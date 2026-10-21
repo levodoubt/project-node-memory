@@ -121,7 +121,7 @@ async function submit() {
     '- [x] `dsh.bundle` declared in `package.json`',
     '- [x] Entry file is `data/plugins/levodoubt__project-node-memory.yml`',
     '- [x] Description matches what the code actually does',
-    '- [x] Released: https://github.com/levodoubt/project-node-memory/releases/tag/v1.0.0',
+    '- [x] Released: https://github.com/levodoubt/project-node-memory/releases',
     '- [x] npm: https://www.npmjs.com/package/project-node-memory',
     '',
     'Submitted after the 24 h repository-age gate, so CI should be green on the first run.',
