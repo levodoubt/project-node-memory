@@ -1,6 +1,6 @@
 # project-node-memory
 
-> [简体中文](README.md) · English
+> English · [中文](README.md)
 
 A DSH plugin that treats **a directory of Markdown as a database**: nine `kb_*` tools for the agent, and a center-column panel for humans (sidebar entry: 「项目节点知识库」).
 
