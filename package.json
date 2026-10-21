@@ -1,26 +1,27 @@
 {
   "name": "project-node-memory",
-  "version": "0.4.2",
+  "version": "1.0.0",
   "description": "Project node knowledge base for DSH agents: markdown-as-database, stable TIDs, transclusion projection, structure self-check.",
   "type": "module",
   "license": "MIT",
-  "author": "doubter439-max",
-  "homepage": "https://github.com/doubter439-max/project-node-memory#readme",
+  "author": "levodoubt",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/doubter439-max/project-node-memory.git"
+    "url": "git+https://github.com/levodoubt/project-node-memory.git"
   },
+  "homepage": "https://github.com/levodoubt/project-node-memory#readme",
   "bugs": {
-    "url": "https://github.com/doubter439-max/project-node-memory/issues"
+    "url": "https://github.com/levodoubt/project-node-memory/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "dsh-plugin",
-    "dsh",
     "knowledge-base",
     "markdown",
     "context",
-    "project-memory",
-    "agent-tools"
+    "project-memory"
   ],
   "exports": {
     ".": {
@@ -36,8 +37,8 @@
     "skills",
     "cordis.patch.yml",
     "README.md",
-    "README_EN.md",
-    "LICENSE"
+    "LICENSE",
+    "README_EN.md"
   ],
   "engines": {
     "node": ">=18"
