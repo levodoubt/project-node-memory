@@ -1,6 +1,6 @@
 # project-node-memory
 
-> 中文 · [English](README_EN.md)
+> 简体中文 · [English](README_EN.md)
 
 把 **Markdown 目录当成知识库** 的 DSH 插件：为 Agent 提供 9 个 `kb_*` 工具，为人类提供知识节点面板（侧栏入口名「项目节点知识库」）。
 
