@@ -196,6 +196,35 @@ The plugin touches eight host APIs, all under `lib/host/`. What breaks, and how 
 - Reinstalling any later version needs no migration.
 - Only **maintainability** degrades: no `diag` net after hand edits, and renames no longer rewrite `[[old]]` for you while `kb_rename` is gone.
 
+## Releasing (how the repo maps to npm)
+
+The "Repository / Homepage" links on the npm page are **not configured by hand** — they come from three `package.json` fields. The marketplace probe also uses `repository` to claim the npm package for the GitHub repository:
+
+```json
+"repository": { "type": "git", "url": "git+https://github.com/levodoubt/project-node-memory.git" },
+"homepage": "https://github.com/levodoubt/project-node-memory#readme",
+"bugs": { "url": "https://github.com/levodoubt/project-node-memory/issues" }
+```
+
+Repo changes reach npm through `.github/workflows/publish.yml`: **pushing a `v*` tag publishes**, with no long-lived token.
+
+```bash
+npm version patch          # bump + commit + tag v1.0.1
+git push --follow-tags     # triggers the publish workflow
+```
+
+The workflow checks that the tag matches `package.json`, runs `scripts/check.mjs`, publishes with `npm publish --provenance`, then attaches the same tarball to the GitHub release.
+
+Authentication is **OIDC trusted publishing** (GitHub mints a short-lived credential), configured once on npmjs.com:
+
+1. https://www.npmjs.com/package/project-node-memory → **Settings** → **Trusted Publisher**
+2. Choose **GitHub Actions**, fill in `levodoubt` / `project-node-memory` / `publish.yml` (leave environment empty)
+3. After that the workflow needs no `NPM_TOKEN` secret
+
+Two visible results: a **Provenance** badge on the package page ("Built and signed on GitHub Actions"), and no staged-publishing hold — a 2FA-protected account publishing with a token can get parked in Staged awaiting approval, while an OIDC publish goes live directly.
+
+`.github/workflows/ci.yml` runs the same self-check on every push / PR, so a broken commit cannot land on `main`.
+
 ## License
 
 MIT

@@ -200,6 +200,35 @@ node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python �
 - 重新装回任意后续版本，库不需要迁移。
 - 唯一会变糙的是**维护性**：手改文件后没有 `diag` 兜底，改名要靠手搬引用（`kb_rename` 不在时没人帮你改 `[[old]]`）。
 
+## 发布（仓库 → npm 的对应关系）
+
+npm 页面上那个 "Repository / Homepage" 链接**不是手动绑定的**，它来自 `package.json` 的三个字段——市场探针也靠 `repository` 把 npm 包认领回 GitHub 仓库：
+
+```json
+"repository": { "type": "git", "url": "git+https://github.com/levodoubt/project-node-memory.git" },
+"homepage": "https://github.com/levodoubt/project-node-memory#readme",
+"bugs": { "url": "https://github.com/levodoubt/project-node-memory/issues" }
+```
+
+仓库改动同步到 npm 靠 `.github/workflows/publish.yml`：**推 `v*` tag 就发布**，不需要长期 token。
+
+```bash
+npm version patch          # 升版本 + 生成 commit + tag v1.0.1
+git push --follow-tags     # 触发 publish workflow
+```
+
+workflow 做的事：校验 tag 与 `package.json` 版本一致 → 跑 `scripts/check.mjs` → `npm publish --provenance` → 把同一个 tarball 传到 GitHub Release。
+
+认证走 **OIDC trusted publishing**（GitHub 给自己签发临时凭据），需要先在 npmjs.com 上配置一次：
+
+1. https://www.npmjs.com/package/project-node-memory → **Settings** → **Trusted Publisher**
+2. 选 **GitHub Actions**，填 `levodoubt` / `project-node-memory` / `publish.yml`（environment 留空）
+3. 配好之后，这个 workflow 不再需要 `NPM_TOKEN` secret
+
+配好后会多两样东西：包页面的 **Provenance** 徽章（"Built and signed on GitHub Actions"），以及 npm 侧不被"暂存发布"卡住——带 2FA 的账号用 token 发布时可能被扣进 Staged 待批，OIDC 发布则直接生效。
+
+`.github/workflows/ci.yml` 在每次 push / PR 上跑同一个自检，坏提交进不了 `main`。
+
 ## License
 
 MIT

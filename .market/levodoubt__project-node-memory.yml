@@ -1,6 +1,7 @@
 url: https://github.com/levodoubt/project-node-memory
 name: levodoubt/project-node-memory
 category: memory
+tarball: https://github.com/levodoubt/project-node-memory/releases/download/v1.0.0/project-node-memory-1.0.0.tgz
 description:
-  en: "Project knowledge base for DSH agents: nine kb_* tools over a plain Markdown .nodekb/ directory — stable TIDs instead of line numbers, in-place reference expansion, structural self-check, rename with whole-library reference rewriting, scaffold and validated writes — plus a three-column panel (node tree, type-stroked node graph, rendered Markdown/LaTeX node view). No index database, no embeddings, no background process; the files stay ordinary Markdown after uninstall."
-  zh: "面向 DSH Agent 的项目知识库：9 个 kb_* 工具直接读写项目里的 .nodekb/ Markdown 目录——用稳定 TID 代替行号、引用就地展开、结构自检、改名时改写全库引用、一键建骨架与带校验的写入——配三列面板（节点树、按类型描边的节点图、渲染后的 Markdown/LaTeX 节点内容）。没有索引库、没有向量、没有后台进程，卸载后文件仍是普通 Markdown。"
+  en: 'Markdown-as-database project knowledge base for DSH agents: stable TIDs, [[transclusion]] that unfolds references in place, bounded reads, structural lint, workspace-first library discovery, inline git snapshots, a node-graph panel, and a bundled prompt section plus skill that make the agent reach for kb_* instead of hand-written docs/.'
+  zh: '给 DSH Agent 用的「md 即数据库」项目知识库：稳定 TID、[[转写]]就地展开、有界读取、结构 lint、工作区优先的库发现、内嵌 git 快照、节点图面板，另带系统提示词段落与随包技能，让 Agent 优先用 kb_* 而不是手写 docs/。'
