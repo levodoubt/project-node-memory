@@ -1,0 +1,63 @@
+{
+  "name": "project-node-memory",
+  "version": "0.4.2",
+  "description": "Project node knowledge base for DSH agents: markdown-as-database, stable TIDs, transclusion projection, structure self-check.",
+  "type": "module",
+  "license": "MIT",
+  "author": "doubter439-max",
+  "homepage": "https://github.com/doubter439-max/project-node-memory#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/doubter439-max/project-node-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/doubter439-max/project-node-memory/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "knowledge-base",
+    "markdown",
+    "context",
+    "project-memory",
+    "agent-tools"
+  ],
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "skills",
+    "cordis.patch.yml",
+    "README.md",
+    "README_EN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node --test test/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "slots"
+      ]
+    },
+    "compatibility": {
+      "dsh": ">=0.1.5-rc.1"
+    }
+  }
+}

@@ -1,0 +1,5 @@
+# `dsh plugin add project-node-memory` 时自动挂载本插件。
+# id 是 cordis 行 id（任意唯一即可）；name 必须是 package.json 的包名。
+- insert:
+    - id: nodekb
+      name: project-node-memory
