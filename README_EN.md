@@ -35,7 +35,7 @@ There is a hard size gate too: a `mode=subtree` render above `maxlen` (default 5
 A tool description is only read *after* the agent has already decided "I should record knowledge". Getting it to prefer this path takes four layers:
 
 1. **A system-prompt section** (on by default, `prompt.enabled=false` to disable). It is present every turn, and the rule is five lines: to record something use `.nodekb/` + `kb_*`, don't hand-roll `docs/*.md` with `write`. The section is ~450 characters; `GET /nodekb/api/prompt` proves whether it registered.
-2. **Make "create a library" one call.** `kb_init` lays out `doc/ facts/ lessons/ todo/ index/entry.md` plus the placement conventions in `.nodekb/README.md` (idempotent, never overwrites). Without it, the agent invents its own directory structure.
+2. **Make "create a library" one call.** `kb_init` lays out `doc/ lessons/ todo/ index/entry.md` plus the placement conventions in `.nodekb/README.md` (idempotent, never overwrites). Without it, the agent invents its own directory structure.
 3. **Writes go through a tool too.** `kb_write` validates TID syntax, that `<node>` / `</node>` sit on their own lines, and that the path stays inside the library — then runs `diag` immediately and reports dangling refs and duplicate blocks. Plain `write` has no such layer, so the rules survive only by memory.
 4. **A bundled skill, `project-node-memory-guide`** (loaded on demand). The prompt section is five lines; the writing conventions (how to split files, how to name TIDs, what to read before writing, three anti-patterns) live in `skills/project-node-memory-guide/SKILL.md`. It works out of the box with **no manual step**: when the host exposes a `skills` service, the plugin registers the body in memory via `ctx.skills.register()` (no prompt cost until used, withdrawn when the plugin is disabled). `skill.enabled=false` disables it; `GET /nodekb/api/skill` proves whether it registered.
 
@@ -98,7 +98,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet |
 | `kb_diag` | Structure self-check; fails outright on errors so you don't finish a read before noticing a broken ref |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
-| `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ facts/ lessons/ todo/ index/` plus placement conventions |
+| `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions |
 | `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block in place); validates before writing, self-checks after |
 | `kb_rename` | Rename a file and rewrite every `[[TID]]` pointing at it (including `[[tid:1.2]]`); re-reads before writing, so concurrent edits are never clobbered |
 | `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (explains itself when git is missing) |
@@ -140,21 +140,32 @@ The panel has no session context, so it follows **the workspace of the most rece
 ## Syntax (the whole of it)
 
 ```md
-## 3.1 Compile contract     → node tid = doc:03-build:3.1 (positional, cannot be a reference target)
+## 3.1 Compile contract     → node tid = doc:03-build:3.1 (positional)
 <node name="fact:abi" type="fact" parent="doc:03-build">
-body                                    ← explicit node; a reference expands only this
+body                                    ← explicit node
 </node>
 
-[[fact:abi]]              → reference; expanded in place at render time
-[[doc:03-build]]          → referencing a file/folder = expand its whole subtree
+[[node="doc:03-build:3.1"]]   → structural reference: becomes a link, body is NOT copied
+[[tscl="fact:abi"]]           → value embed: the body of <tscl id="fact:abi"> is substituted
+
+<tscl id="fact:abi">
+three hard rules: … (this id may be defined exactly once per library)
+</tscl>
 ```
 
-Only two hard rules: `<node>` / `</node>` must each occupy an entire line, and an explicit node name must not collide with a file-derived TID.
+One rule of thumb: **structure is a node (link), a single value is tscl (embed)**. Writing the
+same number or conclusion twice is drift, and `kb_diag` reports it; define it once as `<tscl>` and
+leave references at every use site, so a single edit updates the whole library.
+
+Hard rules: `<node>` / `</node>` must each occupy an entire line; nothing inside `<tscl>` is parsed
+as structure (a `##` there is not a heading); a `tscl` id may be defined exactly once and must not
+collide with a node TID. The old `[[TID]]` form still works (macro when a definition exists, link
+otherwise) with a `kb_diag` warning, and goes away in 2.0.
 
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 235 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / prompt section / bundled skill
+node scripts/check.mjs      # 275 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

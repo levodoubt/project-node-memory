@@ -190,7 +190,8 @@ const nodes = parse_library(path.join(root, FIX, '.nodekb'), problems)
 const { report, code } = diag(nodes, { problems, strict: false, libRoot: path.join(root, FIX, '.nodekb') })
 ok('diag 退出码非 0（夹具里故意有坏引用）', code !== 0, String(code))
 ok('diag 抓到悬空引用', report.errors.some((e) => e.includes('悬空引用')), JSON.stringify(report.errors))
-ok('diag 抓到位置型引用', report.errors.some((e) => e.includes('位置型')), JSON.stringify(report.errors))
+ok('diag 抓到位置型链接（1.1 起降为 warning）', report.warnings.some((w) => w.includes('位置型')), JSON.stringify(report.warnings))
+ok('diag 报告定义数', typeof report.def_count === 'number', String(report.def_count))
 ok('diag 报告 nodes/types', typeof report.node_count === 'number' && typeof report.types === 'object')
 
 // ── 4. 浏览器面 ────────────────────────────────────────────────────────────
@@ -753,7 +754,9 @@ section('建库与写库')
     // scaffold
     const first = scaffold(path.join(tmp, '.nodekb'))
     ok('kb_init 建出骨架', first.created.includes('README.md') && first.created.includes('index/entry.md'), first.created.join(','))
-    ok('kb_init 建出四类目录', ['doc/00-overview.md', 'facts/README.md', 'lessons/README.md', 'todo/README.md'].every((f) => first.created.includes(f)))
+    ok('kb_init 建出四类目录', ['doc/00-overview.md', 'lessons/README.md', 'todo/README.md', 'index/entry.md'].every((f) => first.created.includes(f)))
+    ok('kb_init 不再预建 facts/', !first.created.some((f) => f.startsWith('facts/')) && !fs.existsSync(path.join(tmp, '.nodekb', 'facts')))
+    ok('骨架里写明了「目录与类型可自行增删」', fs.readFileSync(path.join(tmp, '.nodekb', 'README.md'), 'utf8').includes('自行增删') || fs.readFileSync(path.join(tmp, '.nodekb', 'README.md'), 'utf8').includes('自己加'))
     const second = scaffold(path.join(tmp, '.nodekb'))
     ok('kb_init 幂等（第二次不覆盖）', second.created.length === 0 && second.skipped.length > 0)
 
@@ -822,6 +825,104 @@ section('建库与写库')
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
+}
+
+// ── 10. tscl 定义与双语法（1.1） ───────────────────────────────────────────
+section('tscl 定义与双语法')
+{
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  const { render_node, render_subtree } = await import(url(path.join(root, 'lib/engine/render.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+
+  const tmp = path.join(root, '.tmp-tscl')
+  const kb = path.join(tmp, '.nodekb')
+  fs.rmSync(tmp, { recursive: true, force: true })
+  const w = (rel, s) => {
+    const p = path.join(kb, rel)
+    fs.mkdirSync(path.dirname(p), { recursive: true })
+    fs.writeFileSync(p, s, 'utf8')
+  }
+  w('README.md', '# 库\n')
+  w(
+    'doc/abi.md',
+    [
+      '# ABI 说明',
+      '',
+      '<tscl id="fact:abi">',
+      '三条硬规则：1) 只用 C ABI；2) 名字加前缀 `fm_`；3) 导出结构体必须定长。',
+      '## 这一行在 tscl 里，不该成为节点',
+      '</tscl>',
+      '',
+      '结构：[[node="doc:other:1"]]；值：[[tscl="fact:abi"]]；旧语法：[[doc:other]]。',
+      '',
+      '<tscl id="fact:one-line">单行定义</tscl>',
+      '',
+      '单行用 [[tscl="fact:one-line"]] 引用。',
+      '',
+      '<tscl id="fact:orphan">没人引用我</tscl>',
+      '',
+      '## 1 引用处',
+      '',
+      '正文。',
+      '',
+    ].join('\n'),
+  )
+  w('doc/other.md', '# 其它\n\n## 1 小节\n\n另一篇的正文，不该被复制过来。\n')
+
+  const problems = []
+  const nodes = parse_library(kb, problems)
+  const { defs } = collectDefs(nodes)
+  ok('收集到多行/单行/未引用定义', defs.has('fact:abi') && defs.has('fact:one-line') && defs.has('fact:orphan'))
+  ok('单行定义正文正确', defs.get('fact:one-line').body === '单行定义', JSON.stringify(defs.get('fact:one-line').body))
+  ok('tscl 内的 ## 不切节点', ![...nodes.keys()].some((t) => /tscl/.test(nodes.get(t).title)), [...nodes.keys()].join(','))
+
+  const ctx = { defs, libRoot: kb }
+  const rn = render_node(nodes, 'doc:abi', ctx)
+  ok('tscl 标签不出现在渲染结果里', !rn.includes('<tscl'), rn.slice(0, 60))
+  ok('值嵌入替换成定义体', rn.includes('三条硬规则') && !rn.includes('[[tscl='))
+  ok('单行宏也能嵌入', rn.includes('单行定义') && !rn.includes('[[tscl="fact:one-line"]]'))
+  ok('node 引用渲染为链接（带行号）', /\[1 小节\]\(doc\/other\.md#L\d+\)/.test(rn), rn.split('\n').find((l) => l.includes('结构')) || '')
+  ok('旧语法对节点也渲染成链接', /\[其它\]\(doc\/other\.md/.test(rn), rn.split('\n').find((l) => l.includes('结构')) || '')
+  const sub = render_subtree(nodes, 'doc:abi', 1, ctx)
+  ok('整支视图不再复制被引用节点的正文', !sub.includes('不该被复制过来'), sub.slice(0, 80))
+
+  // 正常库：定义被引用、无悬空 → 没有 error
+  {
+    const r = diag(nodes, { problems }).report
+    ok('diag 报出「未被引用的定义」', r.warnings.some((w) => /未被引用的定义/.test(w) && /fact:orphan/.test(w)), r.warnings.join(' | ').slice(0, 160))
+    ok('diag 报出旧语法 warning', r.warnings.some((w) => /旧语法/.test(w)))
+    ok('diag 把位置型链接降级为 warning', r.warnings.some((w) => /位置型 TID 链接/.test(w)))
+    ok('正常库没有 error', r.errors.length === 0, r.errors.join(' | ').slice(0, 120))
+  }
+
+  // 逐条构造错误：重复定义 / 与节点 TID 撞名 / 悬空 / 嵌套 / 表格内跨行宏
+  {
+    const tmp2 = path.join(root, '.tmp-tscl-bad')
+    const kb2 = path.join(tmp2, '.nodekb')
+    fs.rmSync(tmp2, { recursive: true, force: true })
+    const w2 = (rel, s) => {
+      const p = path.join(kb2, rel)
+      fs.mkdirSync(path.dirname(p), { recursive: true })
+      fs.writeFileSync(p, s, 'utf8')
+    }
+    w2('README.md', '# 库\n')
+    w2('doc/a.md', '# A\n\n<tscl id="fact:dup">甲</tscl>\n\n<tscl id="doc:a">撞名</tscl>\n\n靠 [[tscl="fact:none"]] 引用。\n')
+    w2('doc/b.md', '# B\n\n<tscl id="fact:dup">乙</tscl>\n\n<tscl id="fact:multi">\n第一行\n第二行\n</tscl>\n\n| 列 | 说明 |\n|---|---|\n| x | [[tscl="fact:multi"]] |\n')
+    w2('doc/c.md', '# C\n\n<tscl id="fact:nested"><tscl id="fact:inner">内</tscl></tscl>\n')
+    const p2 = []
+    const n2 = parse_library(kb2, p2)
+    const r2 = diag(n2, { problems: p2 }).report
+    const all = r2.errors.join(' | ')
+    ok('diag: 重复定义是 error', /重复定义/.test(all) && /fact:dup/.test(all), all.slice(0, 120))
+    ok('diag: 定义与节点 TID 撞名是 error', /命名空间冲突/.test(all))
+    ok('diag: 悬空 tscl 引用是 error', /悬空 tscl 引用/.test(all))
+    ok('diag: 嵌套 <tscl> 是 error', /嵌套/.test(all))
+    ok('diag: 表格里内联跨行宏是 warning', r2.warnings.some((w) => /表格单元格/.test(w)), r2.warnings.slice(0, 2).join(' | '))
+    fs.rmSync(tmp2, { recursive: true, force: true })
+  }
+
+  fs.rmSync(tmp, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

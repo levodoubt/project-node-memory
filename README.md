@@ -35,7 +35,7 @@ Agent 默认靠 `read` / `grep` / `glob` 找东西，代价是**试探**：grep 
 1. **系统提示词段落**（默认开，`prompt.enabled=false` 可关）——每轮都在，规则只有五行：要沉淀就用 `.nodekb/` + `kb_*`，别拿 `write` 手搭 `docs/*.md`。
    段落常驻约 450 字，实测 `GET /nodekb/api/prompt` 可自证是否注册成功。
 
-2. **把「建库」变成一次调用**——`kb_init` 直接铺出 `doc/ facts/ lessons/ todo/ index/entry.md` 与 `.nodekb/README.md` 里的落位约定（幂等，已存在不覆盖）。没有这一步，Agent 会自己发明目录结构。
+2. **把「建库」变成一次调用**——`kb_init` 直接铺出 `doc/ lessons/ todo/ index/entry.md` 与 `.nodekb/README.md` 里的落位约定（幂等，已存在不覆盖）。没有这一步，Agent 会自己发明目录结构。
 
 3. **写也走工具**——`kb_write` 写前校验 TID / `<node>` 独占一行 / 路径不越界，写后立刻跑 diag 把悬空引用与重复块报回来。`write` 没有任何一层会拦，所以规则只能靠记。
 
@@ -101,7 +101,7 @@ config:
 | `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段             |
 | `kb_diag`       | 结构自检；有 error 时直接失败，别读完才发现引用断了                                            |
 | `kb_backlinks`  | 谁引用了它。改 TID / 删节点前先跑                                                              |
-| `kb_init`       | 建 `.nodekb` 骨架（幂等），铺出 `doc/ facts/ lessons/ todo/ index/` 与落位约定                 |
+| `kb_init`       | 建 `.nodekb` 骨架（幂等），铺出 `doc/ lessons/ todo/ index/` 与落位约定                 |
 | `kb_write`      | 写库：`append` / `replace` / `create` / `node`（就地改写一个 `<node>` 块）；写前校验、写后自检 |
 | `kb_rename`     | 文件改名 + 全库 `[[TID]]` 引用一起改写（含 `[[tid:1.2]]`）；写前重读，别人刚改的不覆盖         |
 | `kb_vcs_status` | 库内嵌 git 的快照历史与未提交改动（git 缺失时只说明，不报错）                                  |
@@ -163,21 +163,30 @@ config:
 ## 语法
 
 ```md
-## 3.1 编译契约            → 节点 tid = doc:03-build:3.1（位置型，不能当引用目标）
+## 3.1 编译契约            → 节点 tid = doc:03-build:3.1（位置型）
 <node name="fact:abi" type="fact" parent="doc:03-build">
-正文                                    ← 显式节点，引用只展开它自己
+正文                                    ← 显式节点
 </node>
 
-[[fact:abi]]              → 引用；渲染时就地展开
-[[doc:03-build]]          → 引文件/文件夹 = 展开整支子树
+[[node="doc:03-build:3.1"]]   → 结构引用：渲染成一个链接，不复制正文
+[[tscl="fact:abi"]]           → 值嵌入：把 <tscl id="fact:abi"> 的定义体替换进来
+
+<tscl id="fact:abi">
+三条硬规则：…（这个 id 全库只能定义一次）
+</tscl>
 ```
 
-硬规则只有两条：`<node>` / `</node>` 必须各占整行；显式节点名不能和文件派生 TID 撞。
+一条原则：**结构用节点（链接），值用 tscl（嵌入）**。同一个数字/结论写两遍就是漂移，
+`kb_diag` 会报；写成 `<tscl>` 定义后各处只留一个引用，改一处全库同步。
+
+硬规则：`<node>` / `</node>` 必须各占整行；`<tscl>` 内部不做结构解析（里面的 `##` 不算标题）；
+同一 `tscl` id 全库只能定义一次，且不能与节点 TID 同名。
+旧写法 `[[TID]]` 仍兼容（有定义时当宏、否则当链接），`kb_diag` 会 warning，2.0 移除。
 
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 235 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / 提示词段落 / 随包技能
+node scripts/check.mjs      # 275 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / 提示词段落 / 随包技能
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 

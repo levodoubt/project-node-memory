@@ -64,9 +64,9 @@ function readCase(name, target, opts = {}, pyArgs) {
   check(name, expect.text, got.text)
 }
 
-readCase('read root', 'root', {}, ['read', 'root'])
-readCase('read doc:index subtree', 'doc:index', {}, ['read', 'doc:index'])
-readCase('read fact:abi-trap', 'fact:abi-trap', {}, ['read', 'fact:abi-trap'])
+// 1.1 起渲染语义与 Python 版分叉：[[node="x"]] 只出链接、[[tscl="x"]] 才展开。
+// 所以对拍只保留**结构层**（raw/toc/未命中/maxlen/检索索引/diag 的 error 列表）——
+// 这些是「同一份 md 解析出同一棵树」的证据；渲染差异属于有意变更，由 scripts/check.mjs 覆盖。
 // raw 模式 Python 不套 {"tid","text"} 外壳，直接比对象
 {
   const got = cmdRead(nodes, 'doc:index', { raw: true }).text
@@ -80,11 +80,10 @@ check(
   cmdRead(nodes, 'doc:index', { toc: true }).text,
 )
 
-// node 模式含「本节点含 N 个子节」提示，Python 提示措辞不同 → 只比正文部分
+// node 模式：Python 侧含「本节点含 N 个子节」提示且会展开引用 → 只比前言的纯文本前缀
 {
   const got = cmdRead(nodes, 'doc:index', { node: true }).text.split('\n\n（本节点含')[0]
-  const expect = pyJson(['read', 'doc:index', '--node']).text.split('\n\n（本节点含')[0]
-  check('read doc:index node', expect, got)
+  check('node 模式可比前缀', true, got.startsWith('这是 doc 首页的前言'))
 }
 
 // 未命中 → 候选列表 + code 2
@@ -112,14 +111,25 @@ for (const [name, q] of [
 ]) {
   const expect = pyJson(['search', q, '--limit', '10'])
   const got = cmdSearch(nodes, q, { limit: 10 })
-  check(name, { total: expect.total, count: expect.count, offset: expect.offset, hits: expect.hits }, got.result)
+  // 只比索引结果（命中集合与计数）；snippet 是渲染文本，1.1 起必然不同
+  check(
+    name,
+    { total: expect.total, count: expect.count, offset: expect.offset, tids: expect.hits.map((h) => h.tid) },
+    { total: got.result.total, count: got.result.count, offset: got.result.offset, tids: got.result.hits.map((h) => h.tid) },
+  )
 }
 
-// diag（夹具里故意留了悬空引用 + 位置型 TID 引用）
+// diag：只比 error 列表（warning 侧 1.1 新增了旧语法/未引用定义等检查）
+// 位置型引用在 Python 里是 error、1.1 起降为 warning（链接不像展开那样复制正文），单独比。
 {
   const expect = JSON.parse(py(['diag']))
   const got = cmdDiag(nodes, { problems }).report
-  check('diag', expect, got)
+  check('diag errors', expect.errors.filter((e) => !/位置型/.test(e)), got.errors)
+  check(
+    'diag 位置型降级为 warning',
+    true,
+    expect.errors.some((e) => /位置型/.test(e)) === got.warnings.some((w) => /位置型/.test(w)),
+  )
 }
 
 if (fails.length === 0) {
