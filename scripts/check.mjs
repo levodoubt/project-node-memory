@@ -475,11 +475,13 @@ section('路由 HTTP 端到端')
         fs.rmSync(defLib, { recursive: true, force: true })
         fs.mkdirSync(path.join(defKb, 'doc'), { recursive: true })
         fs.writeFileSync(path.join(defKb, 'README.md'), '# 库\n')
-        fs.writeFileSync(path.join(defKb, 'doc/a.md'), '# A\n\n版本：<tscl id="fact:ver">v1.23.45</tscl>\n\n别处 [[tscl="fact:ver"]]。\n')
+        fs.writeFileSync(path.join(defKb, 'doc/a.md'), '# A\n\n版本：<tscl id="fact:ver">v1.23.45</tscl>\n')
+        // 引用者必须是另一个节点：定义所在节点自己不算「引用者」
+        fs.writeFileSync(path.join(defKb, 'doc/b.md'), '# B\n\n别处 [[tscl="fact:ver"]]。\n')
         const dlib = encodeURIComponent(path.join('.tmp-defs', '.nodekb'))
         const d1 = await j(`/defs?lib=${dlib}&id=${encodeURIComponent('fact:ver')}`)
         ok('GET /defs 200 且给出定义所在节点', d1.status === 200 && d1.body.owner_tid === 'doc:a' && d1.body.body === 'v1.23.45', JSON.stringify(d1.body).slice(0, 140))
-        ok('/defs 列出引用处并带自证文本', d1.body.refs.length === 1 && /定义体/.test(d1.body.text), JSON.stringify(d1.body.refs))
+        ok('/defs 列出引用处并带自证文本', d1.body.refs.length === 1 && d1.body.refs[0].tid === 'doc:b' && /定义体/.test(d1.body.text), JSON.stringify(d1.body.refs))
         const d0 = await j(`/defs?lib=${dlib}`)
         ok('/defs 无 id 时列出全部定义', d0.status === 200 && d0.body.count === 1 && d0.body.defs[0].owner_tid === 'doc:a', JSON.stringify(d0.body).slice(0, 120))
         const dMiss = await j(`/defs?lib=${dlib}&id=${encodeURIComponent('fact:none')}`)
@@ -540,6 +542,7 @@ section('路由 HTTP 端到端')
 section('改名与引用重写')
 try {
   const { rewriteRefsInText, renameFileNode } = await import(url(path.join(root, 'lib/engine/rename.js')))
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
   const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
 
   const sample = '见 [[doc:index]] 与 [[doc:index:3.1]] 与 [[doc:indexx]]\n```\n[[doc:index]]\n```\n收尾'
@@ -590,6 +593,40 @@ try {
       existsErr = e
     }
     ok('目标已存在时拒绝', existsErr !== null && /已存在/.test(existsErr.message), existsErr && existsErr.message)
+
+    // ── P12/P13/P15 回归 ──────────────────────────────────────────────────
+    const quoted = '见 [[node="doc:index"]] 与 [[tscl="doc:index"]] 与 [[node="doc:indexx"]]'
+    const q = rewriteRefsInText(quoted, 'doc:index', 'doc:guide')
+    ok('带引号的 [[node="…"]] 也重写', q.text.includes('[[node="doc:guide"]]'), q.text)
+    ok('带引号的 [[tscl="…"]] 也重写', q.text.includes('[[tscl="doc:guide"]]'), q.text)
+    ok('带引号且前缀相同的不动', q.text.includes('[[node="doc:indexx"]]'))
+
+    fs.cpSync(path.join(root, FIX), path.join(tmp, 'rel'), { recursive: true })
+    const relNodes = parse_library(path.join(tmp, 'rel/.nodekb'), [])
+    const rel = renameFileNode({ nodekb: path.join(tmp, 'rel/.nodekb'), nodes: relNodes }, 'doc/index.md', 'guide4')
+    ok('rename 认相对路径', rel.new_tid === 'doc:guide4', String(rel.new_tid))
+
+    // 缓存签名必须含文件名：改名不改 mtime/size，不重扫就会一直用旧索引
+    fs.cpSync(path.join(root, FIX), path.join(tmp, 'live'), { recursive: true })
+    const liveKb = path.join(tmp, 'live/.nodekb')
+    const firstLib = openLibrary({}, { workspace: tmp }, { lib: liveKb })
+    ok('openLibrary 首次读到 doc:index', firstLib.nodes.has('doc:index'))
+    renameFileNode({ nodekb: liveKb, nodes: firstLib.nodes }, 'doc:index', 'guide3')
+    const secondLib = openLibrary({}, { workspace: tmp }, { lib: liveKb })
+    ok('改名后下一次调用看到新 TID', secondLib.nodes.has('doc:guide3') && !secondLib.nodes.has('doc:index'), [...secondLib.nodes.keys()].slice(0, 4).join(','))
+
+    const { resolve_path } = await import(url(path.join(root, 'lib/engine/render.js')))
+    const { ROOT_TID } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+    ok('target="." 等于库根', resolve_path(secondLib.nodes, '.') === ROOT_TID)
+
+    const { collectDefs, refsToDef, formatDefRead } = await import(url(path.join(root, 'lib/engine/defs.js')))
+    const fakeNodes = new Map([
+      ['doc:x', { tid: 'doc:x', title: 'x', content: '句子 <tscl id="v">1.2</tscl> 与 [[tscl="v"]]', source: 'doc/x.md#L1-L9' }],
+    ])
+    const fdefs = collectDefs(fakeNodes).defs
+    ok('定义所在节点不算引用者', refsToDef(fakeNodes, 'v', fdefs.get('v').ownerTid).length === 0)
+    const withRef = formatDefRead(fdefs.get('v'), [{ tid: 'doc:y', title: 'y', source: 'doc/y.md#L4-L9', line: 2 }])
+    ok('引用行号只拼一次', /doc\/y\.md#L2/.test(withRef) && !/#L9#L/.test(withRef), withRef.split('\n').slice(-1)[0])
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
@@ -910,7 +947,7 @@ section('tscl 定义与双语法')
       '',
     ].join('\n'),
   )
-  w('doc/other.md', '# 其它\n\n## 1 小节\n\n另一篇的正文，不该被复制过来。\n')
+  w('doc/other.md', '# 其它\n\n## 1 小节\n\n另一篇的正文，不该被复制过来。\n\n单行宏的别处引用：[[tscl="fact:one-line"]]。\n')
 
   const problems = []
   const nodes = parse_library(kb, problems)
