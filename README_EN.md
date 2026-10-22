@@ -105,8 +105,10 @@ The right column renders at most 10,000 characters per view (with a truncation n
 
 ## How a library is located
 
-1. `lib` — a path (a skill directory or its `.nodekb`), which must fall inside the workspace or a registered library.
-2. `kb` — a name (from a registry, or discovered in the workspace, e.g. a skill name).
+Every `kb_*` tool takes exactly one location parameter, `kb`, which accepts **either a name or a path**:
+
+1. `kb` = a path (a skill directory or its `.nodekb`, absolute or workspace-relative) — must fall inside the workspace or a registered library.
+2. `kb` = a name (from a registry, or discovered in the workspace, e.g. a skill name).
 3. Neither — the workspace's own `.nodekb/` → the single library discovered in the workspace → the single registered library.
 
 **Discovery**: given a workspace, it looks beyond the root at conventional locations (bounded BFS, depth 2 by default):

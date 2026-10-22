@@ -158,25 +158,42 @@ const FIX = 'test/fixtures/sample'
 const kbList = await byName.kb_list.execute({}, {})
 ok('kb_list 返回文本', typeof kbList.text === 'string' && kbList.text.includes('nodekb'), kbList.text && kbList.text.slice(0, 80))
 
-const readToc = await byName.kb_read.execute({ lib: FIX, target: 'doc:index', mode: 'toc' }, {})
+const readToc = await byName.kb_read.execute({ kb: FIX, target: 'doc:index', mode: 'toc' }, {})
 ok('kb_read toc 列出子节', readToc.text.includes('doc:index:'), readToc.text.slice(0, 120))
-const readOne = await byName.kb_read.execute({ lib: FIX, target: 'fact:abi-trap', mode: 'node' }, {})
+const readOne = await byName.kb_read.execute({ kb: FIX, target: 'fact:abi-trap', mode: 'node' }, {})
 ok('kb_read node 读到正文', readOne.text.includes('拷贝'), readOne.text.slice(0, 80))
 ok('kb_read node 回填了 tid/type', readOne.tid === 'fact:abi-trap' && readOne.type === 'fact', `${readOne.tid}/${readOne.type}`)
-const readSub = await byName.kb_read.execute({ lib: FIX, target: 'doc', mode: 'subtree', maxlen: 0 }, {})
+const readSub = await byName.kb_read.execute({ kb: FIX, target: 'doc', mode: 'subtree', maxlen: 0 }, {})
 ok('kb_read subtree 展开引用', readSub.text.includes('## ') && readSub.chars > 40, String(readSub.chars))
 
-const searched = await byName.kb_search.execute({ lib: FIX, query: '拷贝' }, {})
+const searched = await byName.kb_search.execute({ kb: FIX, query: '拷贝' }, {})
 ok('kb_search 有命中', searched.total > 0 && searched.hits.length > 0, JSON.stringify(searched.total))
 ok('kb_search 命中带稳定 tid', searched.hits.every((h) => typeof h.tid === 'string' && h.tid.length > 0))
 
-const backl = await byName.kb_backlinks.execute({ lib: FIX, target: 'fact:abi' }, {})
+const backl = await byName.kb_backlinks.execute({ kb: FIX, target: 'fact:abi' }, {})
 ok('kb_backlinks 找到引用者', backl.count > 0, String(backl.count))
 ok('kb_backlinks 认出 doc:index', backl.backlinks.some((b) => b.tid === 'doc:index'), JSON.stringify(backl.backlinks.map((b) => b.tid)))
 
+// kb 单参数同时吃名字与路径（去冗：不再有 lib 参数）
+{
+  const byAbs = await byName.kb_read.execute({ kb: path.join(root, FIX), target: 'doc:index', mode: 'toc' }, {})
+  ok('kb 接受绝对路径', byAbs.text.includes('doc:index:'), String(byAbs.chars))
+  const byNodekb = await byName.kb_read.execute({ kb: path.join(root, FIX) + '\\.nodekb', target: 'doc:index', mode: 'node' }, {})
+  ok('kb 接受 .nodekb 结尾的路径', byNodekb.tid === 'doc:index', byNodekb.tid)
+  const byNameArg = (await import(url(path.join(root, 'lib/engine/registry.js')))).resolveLibrary({
+    kb: 'workspace',
+    workspace: path.join(root, FIX),
+  })
+  ok('kb 仍接受库名', byNameArg.name === 'workspace' && /\.nodekb$/.test(byNameArg.nodekb), byNameArg.nodekb)
+  const schemas = JSON.stringify(registered.map((t) => t.parameters))
+  ok('工具 schema 里没有 lib 参数', !/"lib"/.test(schemas))
+  const allProps = registered.flatMap((t) => Object.keys(t.parameters.properties || {}))
+  ok('定位参数只剩一个 kb', allProps.filter((p) => p === 'kb').length === 7 && !allProps.includes('lib'), JSON.stringify(allProps))
+}
+
 let diagThrew = null
 try {
-  await byName.kb_diag.execute({ lib: FIX }, {})
+  await byName.kb_diag.execute({ kb: FIX }, {})
 } catch (e) {
   diagThrew = e
 }
@@ -818,7 +835,7 @@ section('建库与写库')
 
     // 写后自检：故意造一个悬空引用，kb_write 的回执里要看得见
     const wr = await byName.kb_write.execute(
-      { target: 'lessons/002-dangling.md', content: '看到 [[doc:不存在的节点]] 时要报错。\n', lib: pkgDir },
+      { target: 'lessons/002-dangling.md', content: '看到 [[doc:不存在的节点]] 时要报错。\n', kb: pkgDir },
       { workspace: tmp },
     )
     ok('kb_write 写后报出悬空引用', /error/.test(wr.text) && wr.errors > 0, wr.text.slice(0, 90))
