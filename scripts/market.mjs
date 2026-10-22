@@ -81,19 +81,21 @@ async function prepare() {
   })
   console.log(`branch: ${ref.status} ${BRANCH} @ ${base.slice(0, 7)}`)
 
-  // 3) entry file
+  // 3) entry file (create on the branch, or update it if a previous run already committed one)
   const exists = await api(`/repos/${UPSTREAM}/contents/${ENTRY}`)
   if (exists.ok) {
     console.log(`${ENTRY} already exists upstream — nothing to add`)
     return
   }
+  const mine = await api(`/repos/${OWNER}/${UPSTREAM.split('/')[1]}/contents/${ENTRY}?ref=${BRANCH}`)
   const put = await api(`/repos/${OWNER}/${UPSTREAM.split('/')[1]}/contents/${ENTRY}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      message: 'Add levodoubt/project-node-memory',
+      message: mine.ok ? 'Update levodoubt/project-node-memory entry' : 'Add levodoubt/project-node-memory',
       branch: BRANCH,
       content: Buffer.from(YML, 'utf8').toString('base64'),
+      ...(mine.ok ? { sha: mine.json.sha } : {}),
     }),
   })
   console.log(`entry: ${put.status} ${put.ok ? put.json.content.path : put.text.slice(0, 200)}`)
@@ -111,7 +113,8 @@ async function submit() {
     '`project-node-memory` — a markdown-as-database knowledge base for DSH agents.',
     '',
     '- 9 agent tools: `kb_list` `kb_init` `kb_write` `kb_read` `kb_search` `kb_diag` `kb_backlinks` `kb_rename` `kb_vcs_status`',
-    '- Stable TIDs, `[[transclusion]]` unfolded in place, bounded reads, structural lint, workspace-first discovery, inline git snapshots',
+    '- Stable TIDs, `[[node]]` links that never copy text, `[[tscl]]` value definitions expanded in place',
+    '- Bounded reads, structural lint covering `tscl`, workspace-first discovery, inline git snapshots',
     '- Bundled prompt section + skill so the agent reaches for `kb_*` instead of hand-written `docs/`',
     '- Node-graph panel with markdown/LaTeX rendering, sidebar entry + main panel',
     '- Declares `dsh.bundle` (cordis patch) and `dsh.client` (web); npm package mirrors the attached release tarball',
