@@ -468,6 +468,18 @@ section('路由 HTTP 端到端')
       ok('GET /rename (dry_run) 报出新旧 TID', dry.status === 200 && dry.body.dry_run === true && dry.body.new_tid === 'doc:guide', JSON.stringify(dry.body).slice(0, 120))
       ok('dry_run 不动文件', fs.existsSync(path.join(root, FIX, '.nodekb/doc/index.md')))
 
+      // 面板显式给 ws 时必须被采纳（曾因 env/缓存优先级 bug 被忽略，导致库下拉永远是别的项目）
+      const wsDir = path.join(root, '.tmp-ws')
+      fs.rmSync(wsDir, { recursive: true, force: true })
+      fs.mkdirSync(path.join(wsDir, '.dsh/skills/scoped-skill'), { recursive: true })
+      fs.cpSync(path.join(root, FIX, '.nodekb'), path.join(wsDir, '.dsh/skills/scoped-skill/.nodekb'), { recursive: true })
+      const where1 = await j('/where?ws=' + encodeURIComponent(wsDir))
+      ok('where 报告 ws 生效', path.normalize(where1.body.resolved) === path.normalize(wsDir), JSON.stringify(where1.body))
+      const scoped1 = await j('/libs?scope=workspace&ws=' + encodeURIComponent(wsDir))
+      ok('scope=workspace 只回该工作区的库', scoped1.body.libs.length === 1 && scoped1.body.libs[0].name === 'scoped-skill', JSON.stringify(scoped1.body.libs))
+      ok('libs 回显解析到的工作区', path.normalize(scoped1.body.workspace) === path.normalize(wsDir), scoped1.body.workspace)
+      fs.rmSync(wsDir, { recursive: true, force: true })
+
       // 面板没有会话上下文：Agent 调过工具后，面板应能跟着那个工作区走（放在最后做，会改变默认工作区）
       await byName.kb_read.execute({ target: 'fact:abi', mode: 'node' }, { workspace: path.join(root, FIX) })
       const libs2 = await j('/libs')
@@ -565,6 +577,25 @@ section('库发现（工作区里找 .nodekb）')
 
     const rows = listLibraries({ workspace: tmp })
     ok('listLibraries 列出发现的库', rows.length >= 2, JSON.stringify(rows.map((r) => r.name)))
+
+    // scope=workspace：注册表里「路径不在本工作区内」的库不得混进来
+    const insideDir = path.join(tmp, 'a', 'b', 'c')
+    fs.mkdirSync(insideDir, { recursive: true })
+    fs.cpSync(path.join(root, FIX, '.nodekb'), path.join(insideDir, '.nodekb'), { recursive: true })
+    const regFile = path.join(tmp, 'kb_registry.json')
+    fs.writeFileSync(regFile, JSON.stringify({
+      libraries: {
+        outside: { path: path.join(root, FIX) },
+        inside: { path: insideDir },
+        ghost: { path: path.join(tmp, 'no-such-dir') },
+      },
+    }), 'utf8')
+    const all = listLibraries({ workspace: tmp })
+    const scoped = listLibraries({ workspace: tmp, scope: 'workspace' })
+    ok('默认结果含工作区外注册项', all.some((r) => r.name === 'outside'), all.map((r) => r.name).join(','))
+    ok('scope=workspace 剔除工作区外注册项', !scoped.some((r) => r.name === 'outside'), scoped.map((r) => r.name).join(','))
+    ok('scope=workspace 保留工作区内注册项', scoped.some((r) => r.name === 'inside'), scoped.map((r) => r.name).join(','))
+    ok('失效注册项 exists=false（面板据此隐藏）', all.some((r) => r.name === 'ghost' && r.exists === false), JSON.stringify(all.find((r) => r.name === 'ghost')))
 
     let multiErr = null
     try {

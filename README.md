@@ -128,9 +128,23 @@ dsh plugin add ./project-node-memory-<版本>.tgz
           - D:\shared\kb_registry.json
 ```
 
-`config.workspace` 可覆盖「工作区」，默认取会话工作区、再退回进程 cwd。
+`config.workspace` 可覆盖「工作区」；优先级是 **exec 上下文（面板点的目录 / 会话工作区）→ config.workspace → 环境变量 `DSH_NODEKB_WORKSPACE` → 最近一次工具用过的目录 → 进程 cwd**。所以在面板里换目录总能生效，配置只当默认值。
 
-面板拿不到会话上下文，所以它默认跟随**最近一次 `kb_*` 工具调用所在的工作区**（Agent 读过哪个项目，面板就显示哪个项目）；顶栏的目录下拉里直接列出 DSH 用过的项目目录（标了各自发现几个库），点右上「目录」也可以手填路径。选择存在浏览器 localStorage，只影响面板，不影响工具。
+面板拿不到会话上下文，所以它默认跟随**最近一次 `kb_*` 工具调用所在的工作区**（Agent 读过哪个项目，面板就显示哪个项目）；顶栏的目录下拉只列出 DSH 用过的、且**真的有 `.nodekb`** 的项目目录（标了各自发现几个库），点右上「目录」也可以手填路径。选择存在浏览器 localStorage，只影响面板，不影响工具。
+
+面板的两个下拉是联动的：**工作区 → 该工作区里的库**（`GET /nodekb/api/libs?scope=workspace`），全局注册表里的库单独归到「全局注册」分组，路径已不存在的注册项不显示（`exists:false`）。
+
+想知道某个请求最后解析成了哪个工作区，直接看 `GET /nodekb/api/where`：它把 config / env / exec / 上次记忆 / 进程 cwd 与最终结论一起吐出来。
+
+### 「注册」到底指什么
+
+没有注册这一步也能用 —— 只要库落在工作区里的约定位置（见上），它就会出现在列表里。`kb_registry.json` 只是给**不在工作区里**的库用的（比如 F 盘另一个项目、共享笔记目录）：
+
+```json
+{ "libraries": { "my-notes": { "path": "D:\\notes" } } }
+```
+
+读取顺序：`config.libraries` → `config.registries` 指定的文件 → `<ws>/.nodekb/registry.json` → `<ws>/kb_registry.json` → 用户目录的全局注册表（`~/.dsh/nodekb/registry.json`）。注册表里登记的名字优先级高于自动发现的名字，路径重复的以先出现的为准。
 
 ## 语法
 
@@ -185,7 +199,7 @@ node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python �
 | `ctx.inject([...], cb)`                                 | `prompt.js` / `skill.js` | 动态注入不可用 → 段落/技能不注册                            | 退回同步取值；仍失败只告警                                            |
 | `ctx.systemPrompt.section({name,order,text})`           | `lib/host/prompt.js`     | 段落不出现 → Agent 不优先用它（工具仍在）                   | 失败被吞，`/api/prompt` 自证                                          |
 | `ctx.skills.register({…})`                              | `lib/host/skill.js`      | 写法规范不进技能目录                                        | 失败被吞，`/api/skill` 自证                                           |
-| `exec.workspace / cwd / session`                        | `lib/host/runtime.js`    | 定位不到工作区 → 默认库位置错                               | 4 级回退：config → env → exec → 上次工具用过的 → 进程 cwd             |
+| `exec.workspace / cwd / session`                        | `lib/host/runtime.js`    | 定位不到工作区 → 默认库位置错                               | 4 级回退：exec → config → env → 上次工具用过的 → 进程 cwd             |
 | `window.__ModuleLoader__.load({id,factory})`            | `lib/client.js`          | id 不匹配 → `bundle loaded without registering`             | 自检断言 id === 包名                                                  |
 | `ctx.slots.inject` / `slots.register`                   | `lib/client.js`          | 槽名或 props 改名 → 图标不出现                              | 走 official `inject`，失败写 `/api/client-report` 并在面板内自述      |
 
