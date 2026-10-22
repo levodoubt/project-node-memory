@@ -597,6 +597,37 @@ section('库发现（工作区里找 .nodekb）')
     ok('scope=workspace 保留工作区内注册项', scoped.some((r) => r.name === 'inside'), scoped.map((r) => r.name).join(','))
     ok('失效注册项 exists=false（面板据此隐藏）', all.some((r) => r.name === 'ghost' && r.exists === false), JSON.stringify(all.find((r) => r.name === 'ghost')))
 
+    // 忽略名单：临时/探针目录里的 .nodekb 默认不算库，可用 exclude 反向放行
+    const { isExcluded, DEFAULT_EXCLUDE } = await import(url(path.join(root, 'lib/engine/registry.js')))
+    fs.mkdirSync(path.join(tmp, 'tmp_tex/probe-a'), { recursive: true })
+    fs.cpSync(path.join(root, FIX, '.nodekb'), path.join(tmp, 'tmp_tex/probe-a/.nodekb'), { recursive: true })
+    fs.mkdirSync(path.join(tmp, 'src/kb_probe'), { recursive: true })
+    fs.cpSync(path.join(root, FIX, '.nodekb'), path.join(tmp, 'src/kb_probe/.nodekb'), { recursive: true })
+    const withJunk = discoverLibraries(tmp)
+    ok('默认忽略 tmp_* 目录', !withJunk.some((r) => r.nodekb.includes('tmp_tex')), withJunk.map((r) => r.name).join(','))
+    ok('默认忽略 *_probe 目录', !withJunk.some((r) => r.nodekb.includes('kb_probe')), withJunk.map((r) => r.name).join(','))
+    const forced = discoverLibraries(tmp, { exclude: ['!tmp_tex', '!kb_probe'] })
+    ok('!pattern 可重新放行', forced.some((r) => r.nodekb.includes('tmp_tex')) && forced.some((r) => r.nodekb.includes('kb_probe')), forced.map((r) => r.name).join(','))
+    ok('isExcluded 认默认名单', isExcluded('tmp_tex') && isExcluded('kb_probe') && isExcluded('nodekb_lab'))
+    ok('isExcluded 不误伤普通名', !isExcluded('src') && !isExcluded('about-film-measure-project'))
+    ok('exclude 配置可加目录', isExcluded('scratch', { exclude: ['scratch'] }))
+    ok('DEFAULT_EXCLUDE 是数组', Array.isArray(DEFAULT_EXCLUDE) && DEFAULT_EXCLUDE.length > 3)
+
+    // hidden:true —— 只保留「按名字解析」的别名，不进任何列表
+    fs.writeFileSync(regFile, JSON.stringify({
+      libraries: {
+        outside: { path: path.join(root, FIX) },
+        inside: { path: insideDir },
+        alias: { path: insideDir, hidden: true },
+      },
+    }), 'utf8')
+    const listed = listLibraries({ workspace: tmp })
+    ok('hidden 注册项不进列表', !listed.some((r) => r.name === 'alias'), listed.map((r) => r.name).join(','))
+    const withHidden = listLibraries({ workspace: tmp, includeHidden: true })
+    ok('includeHidden 才列出 hidden 项', withHidden.some((r) => r.name === 'alias'), withHidden.map((r) => r.name).join(','))
+    const aliasHit = resolveLibrary({ workspace: tmp, kb: 'alias' })
+    ok('hidden 项仍可按名字解析', aliasHit && aliasHit.name === 'alias' && aliasHit.nodekb.endsWith('.nodekb'), JSON.stringify(aliasHit && aliasHit.name))
+
     let multiErr = null
     try {
       resolveLibrary({ workspace: tmp })

@@ -68,8 +68,16 @@ dsh plugin add ./project-node-memory-<版本>.tgz
 | `workspace`      | 会话工作区 → 进程 cwd                           | 覆盖「工作区」，库发现与路径白名单都以它为界                  |
 | `libraries`      | 无                                              | `名字: 目录`，显式登记工作区之外的库（目录下需有 `.nodekb/`） |
 | `registries`     | 工作区 `.nodekb/registry.json` + 用户全局注册表 | 额外的 `kb_registry.json`（与 Python 版同格式）               |
+| `exclude`        | 见下                                            | 库发现时忽略的目录名，支持 `*` 通配；`!pattern` 强制放行     |
 | `prompt.enabled` | `true`                                          | 是否注册系统提示词段落                                        |
 | `skill.enabled`  | `true`                                          | 是否把随包 Skill 注册进宿主 `skills` 服务                     |
+
+`exclude` 默认忽略这些名字：`tmp`、`tmp_*`、`temp*`、`.tmp*`、`*_probe`、`nodekb_lab`、`__pycache__`、`_release_assets`、`venv`。临时目录、探针目录里的 `.nodekb` 通常是实验残渣，列进选择器只会碍事。要放行某个目录写 `"!tmp_keep"`；要额外忽略写 `"scratch"`（与默认名单叠加）。
+
+```yaml
+config:
+  exclude: ['tmp_*', '!tmp_keep', 'scratch']
+```
 
 ## 面板
 
@@ -145,6 +153,12 @@ dsh plugin add ./project-node-memory-<版本>.tgz
 ```
 
 读取顺序：`config.libraries` → `config.registries` 指定的文件 → `<ws>/.nodekb/registry.json` → `<ws>/kb_registry.json` → 用户目录的全局注册表（`~/.dsh/nodekb/registry.json`）。注册表里登记的名字优先级高于自动发现的名字，路径重复的以先出现的为准。
+
+给条目加 `"hidden": true` 后，它**只作为别名**存在：仍然可以用 `kb="my-notes"` 调用（老文档里写死的库名不会失效），但不会出现在面板的知识库下拉里。
+
+```json
+{ "libraries": { "my-notes": { "path": "D:\\notes", "hidden": true } } }
+```
 
 ## 语法
 

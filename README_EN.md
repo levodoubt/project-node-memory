@@ -65,8 +65,16 @@ All optional, under `config:` on the plugin's row in `cordis.patch.yml`:
 | `workspace` | session workspace → process cwd | Overrides "the workspace"; library discovery and the path whitelist are scoped to it |
 | `libraries` | none | `name: directory` pairs registering libraries outside the workspace (each needs a `.nodekb/`) |
 | `registries` | workspace `.nodekb/registry.json` + user-global registry | Extra `kb_registry.json` files (same format as the Python build) |
+| `exclude` | see below | Directory names skipped during discovery (`*` wildcard; `!pattern` forces inclusion) |
 | `prompt.enabled` | `true` | Register the system-prompt section |
 | `skill.enabled` | `true` | Register the bundled skill with the host `skills` service |
+
+`exclude` defaults to `tmp`, `tmp_*`, `temp*`, `.tmp*`, `*_probe`, `nodekb_lab`, `__pycache__`, `_release_assets`, `venv`. A `.nodekb` inside a scratch or probe directory is usually leftover from an experiment; listing it only clutters the selector. Use `"!tmp_keep"` to force one back in, and plain names to add more:
+
+```yaml
+config:
+  exclude: ['tmp_*', '!tmp_keep', 'scratch']
+```
 
 ## Panel
 
@@ -112,7 +120,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 
 It skips `node_modules` / `dist` / `build` / `out` / `target` / `coverage` / dot-directories and caps `readdir` calls, so the panel can afford to run it on every load. That is what "the knowledge base travels with the project" means: point at a project root and the `.nodekb/` directories inside skills surface on their own.
 
-Registries use the same format as the Python build's `kb_registry.json`; by default the plugin reads `.nodekb/registry.json` in the workspace and the global registry in the user directory. Libraries can also be declared inline:
+Registries use the same format as the Python build's `kb_registry.json`; by default the plugin reads `.nodekb/registry.json` in the workspace and the global registry in the user directory. Add `"hidden": true` to an entry to keep it as an **alias only** — `kb="my-notes"` still resolves (old docs keep working) but the entry never shows up in the panel's library picker. Libraries can also be declared inline:
 
 ```yaml
 - insert:
