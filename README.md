@@ -203,7 +203,7 @@ kb_write mode=node target=<TID> content=…  # 逐条改，或直接改 md 再 k
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 281 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
+node scripts/check.mjs      # 275 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 

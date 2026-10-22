@@ -186,7 +186,7 @@ kb_write mode=node target=<TID> content=…  # fix one at a time, or edit the md
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 281 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
+node scripts/check.mjs      # 275 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 
