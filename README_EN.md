@@ -89,7 +89,7 @@ The Markdown renderer is a small home-grown one (headings, lists, code, tables, 
 The panel is read-only; data flows through host routes under `/nodekb/api/*`. Writing a library means writing Markdown — via `write` / `edit`, or `kb_write`.
 The right column renders at most 10,000 characters per view (with a truncation notice); wide tables scroll horizontally and long text scrolls vertically.
 
-## The nine tools
+## The ten tools
 
 | Tool | What it does |
 |---|---|
@@ -100,7 +100,8 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
 | `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions |
 | `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block in place); validates before writing, self-checks after |
-| `kb_rename` | Rename a file and rewrite every `[[TID]]` pointing at it (including `[[tid:1.2]]`); re-reads before writing, so concurrent edits are never clobbered |
+| `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
+| `kb_migrate` | Rewrites legacy bare refs `[[x]]` into `[[node="x"]]` / `[[tscl="x"]]`; **dry-run by default**, pass `dry_run=false` to write |
 | `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (explains itself when git is missing) |
 
 ## How a library is located
