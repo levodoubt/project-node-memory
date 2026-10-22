@@ -178,7 +178,7 @@ ok('kb_backlinks 认出 doc:index', backl.backlinks.some((b) => b.tid === 'doc:i
 {
   const byAbs = await byName.kb_read.execute({ kb: path.join(root, FIX), target: 'doc:index', mode: 'toc' }, {})
   ok('kb 接受绝对路径', byAbs.text.includes('doc:index:'), String(byAbs.chars))
-  const byNodekb = await byName.kb_read.execute({ kb: path.join(root, FIX) + '\\.nodekb', target: 'doc:index', mode: 'node' }, {})
+  const byNodekb = await byName.kb_read.execute({ kb: path.join(root, FIX, '.nodekb'), target: 'doc:index', mode: 'node' }, {})
   ok('kb 接受 .nodekb 结尾的路径', byNodekb.tid === 'doc:index', byNodekb.tid)
   const byNameArg = (await import(url(path.join(root, 'lib/engine/registry.js')))).resolveLibrary({
     kb: 'workspace',
