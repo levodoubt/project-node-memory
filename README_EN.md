@@ -101,7 +101,6 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions |
 | `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block in place); validates before writing, self-checks after |
 | `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
-| `kb_migrate` | Rewrites legacy bare refs `[[x]]` into `[[node="x"]]` / `[[tscl="x"]]`; **dry-run by default**, pass `dry_run=false` to write |
 | `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (explains itself when git is missing) |
 
 ## How a library is located
@@ -176,21 +175,18 @@ readable after the plugin is removed. Only two things changed:
    `<tscl>` definitions inside the `doc/` file they belong to.
 
 Do old libraries need migrating? **No** — they keep working, `kb_diag` just emits one warning per
-bare reference. To migrate:
+bare reference. To migrate, have the agent walk the `kb_diag` list and fix each one (syntax only, no
+TID or file changes):
 
 ```text
-kb_migrate                        # dry run: how many refs per file, which ones are already dangling
-kb_migrate dry_run=false          # write
+kb_diag                                    # lists every `旧语法引用` (legacy bare ref)
+kb_write mode=node target=<TID> content=…  # fix one at a time, or edit the md and re-run kb_diag
 ```
-
-Migration only changes syntax (`[[doc:x]]` → `[[node="doc:x"]]`, or `[[tscl="…"]]` when the id is a
-definition). No TID changes, no file moves, so references and rendered output stay identical; fenced
-code blocks are skipped.
 
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 290 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / migration / prompt section / bundled skill
+node scripts/check.mjs      # 281 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

@@ -81,8 +81,8 @@ const stubCtx = {
 const dispose = host.apply(stubCtx, {})
 ok('apply 返回 disposer', typeof dispose === 'function')
 const names = registered.map((t) => t.name)
-ok('注册 10 个工具', registered.length === 10, names.join(','))
-for (const want of ['kb_list', 'kb_read', 'kb_search', 'kb_diag', 'kb_backlinks', 'kb_init', 'kb_write', 'kb_rename', 'kb_migrate', 'kb_vcs_status']) {
+ok('注册 9 个工具', registered.length === 9, names.join(','))
+for (const want of ['kb_list', 'kb_read', 'kb_search', 'kb_diag', 'kb_backlinks', 'kb_init', 'kb_write', 'kb_rename', 'kb_vcs_status']) {
   ok(`工具 ${want} 在册`, names.includes(want))
 }
 ok('每个工具都有 description', registered.every((t) => typeof t.description === 'string' && t.description.length > 20))
@@ -128,8 +128,8 @@ ok(
     {},
   )
   const toolsMod = await import(url(path.join(root, 'lib/host/tools.js')))
-  ok('单个工具注册失败不带走其余的', solo.length === 9 && !solo.includes('kb_read'), solo.join(','))
-  ok('失败清单可自证', JSON.stringify(toolsMod.toolState().failed) === '["kb_read"]' && toolsMod.toolState().registered === 9, JSON.stringify(toolsMod.toolState()))
+  ok('单个工具注册失败不带走其余的', solo.length === 8 && !solo.includes('kb_read'), solo.join(','))
+  ok('失败清单可自证', JSON.stringify(toolsMod.toolState().failed) === '["kb_read"]' && toolsMod.toolState().registered === 8, JSON.stringify(toolsMod.toolState()))
 }
 
 // 改名前的旧 route（闭包里的旧符号）在调用时必须转到跳板 —— 「改名不重启」全靠这一步
@@ -923,73 +923,6 @@ section('tscl 定义与双语法')
   }
 
   fs.rmSync(tmp, { recursive: true, force: true })
-}
-
-section('旧语法迁移（kb_migrate）')
-{
-  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
-  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
-  const { migrateText, migrateLibrary, formatMigrate } = await import(url(path.join(root, 'lib/engine/migrate.js')))
-
-  // 纯函数：分流 + 围栏 + 已迁移写法不动 + 未命中原样保留
-  {
-    const src = [
-      '节点 [[doc:a]] 与定义 [[fact:x]]。',
-      '已经迁好的 [[node="doc:a"]] 与 [[tscl="fact:x"]] 不动。',
-      '不存在 [[no:such]] 原样留着。',
-      '```',
-      '代码里的 [[doc:a]] 不该改',
-      '```',
-    ].join('\n')
-    const { text, hits } = migrateText(src, {
-      isTid: (id) => id === 'doc:a',
-      isDef: (id) => id === 'fact:x',
-    })
-    ok('迁移：节点引用 → [[node="…"]]', text.includes('[[node="doc:a"]]'), text.slice(0, 60))
-    ok('迁移：定义引用 → [[tscl="…"]]', text.includes('[[tscl="fact:x"]]'))
-    ok('迁移：不存在的 id 原样保留', text.includes('[[no:such]]') && hits.unresolved.includes('no:such'))
-    ok('迁移：围栏内不动', text.includes('代码里的 [[doc:a]] 不该改'))
-    ok('迁移：计数正确', hits.node === 1 && hits.tscl === 1, JSON.stringify(hits))
-  }
-
-  // 整库：dry_run 不落盘，dry_run=false 落盘后 diag 干净
-  {
-    const tmp = path.join(root, '.tmp-migrate')
-    const kb = path.join(tmp, '.nodekb')
-    fs.rmSync(tmp, { recursive: true, force: true })
-    const w = (rel, s) => {
-      const p = path.join(kb, rel)
-      fs.mkdirSync(path.dirname(p), { recursive: true })
-      fs.writeFileSync(p, s, 'utf8')
-    }
-    const doc = '# A\n\n<tscl id="fact:x">值</tscl>\n\n见 [[doc:b]] 与 [[fact:x]]，瞎写 [[ghost:tid]]。\n'
-    w('README.md', '# 库\n')
-    w('doc/a.md', doc)
-    w('doc/b.md', '# B\n\n正文。\n')
-
-    const problems = []
-    const nodes = parse_library(kb, problems)
-    const { defs } = collectDefs(nodes)
-    const lib = { nodekb: kb, nodes, defs, problems }
-
-    const dry = migrateLibrary(lib, { dryRun: true })
-    ok('迁移演练：dry_run 标记为 true', dry.dry_run === true)
-    ok('迁移演练：统计出 1 个文件 2 处', dry.files.length === 1 && dry.files[0].count === 2, JSON.stringify(dry.files))
-    ok('迁移演练：不改磁盘', fs.readFileSync(path.join(kb, 'doc/a.md'), 'utf8') === doc)
-
-    const wet = migrateLibrary(lib, { dryRun: false })
-    const after = fs.readFileSync(path.join(kb, 'doc/a.md'), 'utf8')
-    ok('迁移落盘：改写成功', after.includes('[[node="doc:b"]]') && after.includes('[[tscl="fact:x"]]'), after.slice(0, 80))
-    ok('迁移落盘：不存在的 id 保留', after.includes('[[ghost:tid]]'))
-    ok('迁移落盘：报告可读', /共 2 处裸引用/.test(formatMigrate(wet)), formatMigrate(wet).slice(0, 80))
-
-    // 落盘后重新解析：不再有旧语法 warning、也没有悬空宏
-    const p3 = []
-    const n3 = parse_library(kb, p3)
-    const r3 = diag(n3, { problems: p3 }).report
-    ok('迁移后没有旧语法 warning', !r3.warnings.some((x) => /旧语法/.test(x) && !/ghost:tid/.test(x)), r3.warnings.join(' | ').slice(0, 120))
-    fs.rmSync(tmp, { recursive: true, force: true })
-  }
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
