@@ -4,20 +4,29 @@
  * 用途：重启前就能验证「rename / render / diag 在真实数据上跑得动」，
  * 而不是等宿主重载插件之后才发现算错。只读 —— dry_run，不写任何文件。
  *
- *   node scripts/probe-real.mjs [库根] [节点 TID] [新文件名]
+ *   node scripts/probe-real.mjs <库根> [节点 TID] [新文件名]
+ *
+ * 库根必填（这里不写任何本机绝对路径）；也可以在环境变量里给 NKB_LIB。
  */
 import fs from 'node:fs'
+import path from 'node:path'
 import { parse_library } from '../lib/engine/mdlib.js'
 import { render_node, toc_lines, node_info } from '../lib/engine/render.js'
 import { diag } from '../lib/engine/diag.js'
 import { renameFileNode, formatRename } from '../lib/engine/rename.js'
 
-const LIB = process.argv[2] || 'D:/desktop/FilmMeasureProject/.dsh/skills/about-film-measure-project/.nodekb'
-let TID = process.argv[3] || 'doc:03-工程经验与已知坑'
+const LIB = process.argv[2] || process.env.NKB_LIB || ''
+let TID = process.argv[3] || 'root'
 const NEW = process.argv[4] || (TID.split(':').pop() + '-v2')
 
 const out = []
 function log(...a) { out.push(a.join(' ')) }
+
+if (!LIB) {
+  log('用法: node scripts/probe-real.mjs <库根> [节点 TID] [新文件名]   （或设 NKB_LIB）')
+  fs.writeFileSync('.probe-real.txt', out.join('\n') + '\n', 'utf8')
+  process.exit(1)
+}
 
 if (!fs.existsSync(LIB)) {
   log(`库不存在: ${LIB}`)
