@@ -81,8 +81,8 @@ const stubCtx = {
 const dispose = host.apply(stubCtx, {})
 ok('apply 返回 disposer', typeof dispose === 'function')
 const names = registered.map((t) => t.name)
-ok('注册 9 个工具', registered.length === 9, names.join(','))
-for (const want of ['kb_list', 'kb_read', 'kb_search', 'kb_diag', 'kb_backlinks', 'kb_init', 'kb_write', 'kb_rename', 'kb_vcs_status']) {
+ok('注册 10 个工具', registered.length === 10, names.join(','))
+for (const want of ['kb_list', 'kb_read', 'kb_search', 'kb_diag', 'kb_backlinks', 'kb_init', 'kb_register', 'kb_write', 'kb_rename', 'kb_vcs_status']) {
   ok(`工具 ${want} 在册`, names.includes(want))
 }
 ok('每个工具都有 description', registered.every((t) => typeof t.description === 'string' && t.description.length > 20))
@@ -128,8 +128,8 @@ ok(
     {},
   )
   const toolsMod = await import(url(path.join(root, 'lib/host/tools.js')))
-  ok('单个工具注册失败不带走其余的', solo.length === 8 && !solo.includes('kb_read'), solo.join(','))
-  ok('失败清单可自证', JSON.stringify(toolsMod.toolState().failed) === '["kb_read"]' && toolsMod.toolState().registered === 8, JSON.stringify(toolsMod.toolState()))
+  ok('单个工具注册失败不带走其余的', solo.length === 9 && !solo.includes('kb_read'), solo.join(','))
+  ok('失败清单可自证', JSON.stringify(toolsMod.toolState().failed) === '["kb_read"]' && toolsMod.toolState().registered === 9, JSON.stringify(toolsMod.toolState()))
 }
 
 // 改名前的旧 route（闭包里的旧符号）在调用时必须转到跳板 —— 「改名不重启」全靠这一步
@@ -980,6 +980,66 @@ section('tscl 定义与双语法')
   }
 
   fs.rmSync(tmp, { recursive: true, force: true })
+}
+
+// ── 11. 工作区解析与登记（1.4.0） ─────────────────────────────────────────
+{
+  section('工作区解析（1.4.0）')
+  const wsRoot = path.join(root, '.tmp-ws')
+  const otherWs = path.join(root, '.tmp-ws-other')
+  fs.rmSync(wsRoot, { recursive: true, force: true })
+  fs.rmSync(otherWs, { recursive: true, force: true })
+  fs.mkdirSync(wsRoot, { recursive: true })
+  fs.mkdirSync(path.join(otherWs, '.nodekb'), { recursive: true })
+  fs.writeFileSync(path.join(otherWs, '.nodekb', 'README.md'), '# 别人的库\n', 'utf8')
+
+  const reg = []
+  const ctx2 = {
+    tools: { register: (t) => { reg.push(t); return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (name) => {
+      if (name === 'sessions') return { get: (id) => (id === 's-1' ? { header: { cwd: wsRoot } } : null) }
+      if (name === 'workspaceRegistry') return { list: () => [{ path: wsRoot }, { path: otherWs }] }
+      return null
+    },
+  }
+  host.apply(ctx2, {})
+  const t2 = Object.fromEntries(reg.map((t) => [t.name, t]))
+  ok('第二套 ctx 也注册 10 个工具', reg.length === 10, reg.map((t) => t.name).join(','))
+
+  const listed = await t2.kb_list.execute({}, { agent: { id: 's-1' } })
+  ok('工作区取自会话头 cwd', path.resolve(listed.workspace) === path.resolve(wsRoot), String(listed.workspace))
+  ok('kb_list 报出工作区来源', listed.workspaceFrom === 'session.header.cwd', String(listed.workspaceFrom))
+  ok('kb_list 列绝对路径', listed.libs.every((r) => path.isAbsolute(r.path)), JSON.stringify(listed.libs.slice(0, 2)))
+  ok('kb_list 不含 lib 参数（单参数定位）', !t2.kb_list.parameters.properties || !t2.kb_list.parameters.properties.lib)
+
+  // 跨工作区守卫：目标落在另一个已登记工作区里要拒绝，并报出双方路径
+  let guardErr = ''
+  try {
+    await t2.kb_init.execute({ dir: path.join(otherWs, 'newkb') }, { agent: { id: 's-1' } })
+  } catch (e) {
+    guardErr = e.message
+  }
+  ok('kb_init 拒绝写进另一个已登记工作区', /另一个已登记的工作区/.test(guardErr), guardErr.slice(0, 100))
+  ok('kb_init 报出双方路径与来源', guardErr.includes(otherWs) && guardErr.includes(wsRoot) && /来源:/.test(guardErr))
+
+  // kb_register：写项目自己的 kb_registry.json
+  const regRes = await t2.kb_register.execute({ dir: otherWs, name: 'other' }, { agent: { id: 's-1' } })
+  const regFile = path.join(wsRoot, 'kb_registry.json')
+  ok('kb_register 写项目注册表', fs.existsSync(regFile), regRes.file)
+  const regJson = JSON.parse(fs.readFileSync(regFile, 'utf8'))
+  ok('kb_register 登记项指向库目录', regJson.libraries.other.path === path.resolve(otherWs), JSON.stringify(regJson.libraries))
+  ok('kb_register 回执给出文件名', /kb_registry\.json/.test(regRes.text), regRes.text.slice(0, 80))
+  let noKbErr = ''
+  try {
+    await t2.kb_register.execute({ dir: path.join(wsRoot, 'nowhere') }, { agent: { id: 's-1' } })
+  } catch (e) {
+    noKbErr = e.message
+  }
+  ok('kb_register 拒绝没有 .nodekb 的目录', /没有 \.nodekb/.test(noKbErr), noKbErr.slice(0, 80))
+
+  fs.rmSync(wsRoot, { recursive: true, force: true })
+  fs.rmSync(otherWs, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

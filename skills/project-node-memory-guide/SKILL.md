@@ -79,5 +79,6 @@ kb_write target=doc/03-...md          mode=append  content=...
 
 ## 注意事项
 
+0. 库定位找不到时先 `kb_list`：它会写明本会话判定的工作区、来源（会话头 / 配置 / 面板）与每个库的绝对路径。已有的库用 `kb_register dir=<库目录> name=<名字>` 登记进项目的 `kb_registry.json`，不要让人去改插件配置。
 1. 不要把整段对话贴进 `doc/` —— 记的是过程，不是结论。
 2. 不要把同一件事在 `doc/` 和 `lessons/` 各写一份 —— 抽成 `<tscl>` 定义，两处都引用它。

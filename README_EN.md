@@ -93,12 +93,13 @@ The right column renders at most 10,000 characters per view (with a truncation n
 
 | Tool | What it does |
 |---|---|
-| `kb_list` | Which libraries exist and which is default. Call this first when unsure what `kb` to pass |
+| `kb_list` | Which libraries exist (absolute paths and origins) plus the workspace this call resolved to. Call this first when unsure what `kb` to pass |
 | `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen` |
 | `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet |
 | `kb_diag` | Structure self-check; fails outright on errors so you don't finish a read before noticing a broken ref |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
 | `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions |
+| `kb_register` | Register an existing library in the **project's own** `kb_registry.json` (never the global registry or the plugin config) |
 | `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block in place); validates before writing, self-checks after |
 | `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
 | `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (explains itself when git is missing) |
@@ -135,7 +136,17 @@ Registries use the same format as the Python build's `kb_registry.json`; by defa
           - D:\shared\kb_registry.json
 ```
 
-`config.workspace` overrides "the workspace", which otherwise comes from the session and falls back to the process cwd.
+"The workspace" is the basis for both library resolution and the writable allowlist:
+
+1. **the session header's `cwd`** (for tool calls) — `exec.agent.id` → `ctx.get('sessions').get(id).header.cwd`. This is the only reliable source: the `exec` DSH hands a tool has no `cwd`/`workspace` field at all.
+2. an explicit directory in `exec` (the `ws` a panel request carries).
+3. `config.workspace`.
+4. the `DSH_NODEKB_WORKSPACE` environment variable.
+5. only for the panel (which has no session): the workspace of the most recent tool call; last resort, the process cwd.
+
+Every `kb_list` / `kb_init` receipt states which workspace was used and which layer it came from; `GET /nodekb/api/where` reports the same.
+
+`kb_init` refuses to write into a **different** registered workspace and prints both paths — so a relative path can never silently land in another project. To work there, open a session in that project; or use `kb_register` to register an existing library with the current project. `kb_register` writes only `<project>/kb_registry.json` (commit it), never the global registry or the plugin config — permissions become solvable from inside the tool set.
 
 The panel has no session context, so it follows **the workspace of the most recent `kb_*` tool call** (whichever project the agent read, the panel shows). The directory dropdown in the header lists projects DSH has used, annotated with how many libraries each contains; the 「目录」 button lets you type a path. The choice is stored in browser localStorage and affects the panel only, never the tools.
 
