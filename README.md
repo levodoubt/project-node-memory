@@ -183,6 +183,18 @@ config:
 
 硬规则：`<node>` / `</node>` 必须各占整行；`<tscl>` 内部不做结构解析（里面的 `##` 不算标题）；
 同一 `tscl` id 全库只能定义一次，且不能与节点 TID 同名。
+
+定义也可以**就地写在句子中间**，渲染时标签被剥掉、值留在原处：
+
+```md
+当前版本号为：<tscl id="fact:ver">v1.23.45</tscl>，向下兼容 v1.22。
+ABI 校验见 [[tscl="fact:ver"]]。
+```
+
+句内定义**必须单行闭合**（行首的 `<tscl>` 才有跨行保护）；定义别写进表格行（`|` 会破格，
+`kb_diag` 会 warning）。要核一个值，`kb_read target=<定义 id>` 直接回
+「定义体 / 定义在哪个节点 / 被谁引用」。
+
 旧写法 `[[TID]]` 仍兼容（有定义时当宏、否则当链接），`kb_diag` 会 warning，2.0 移除。
 
 ## 从 1.0 升到 1.1
@@ -205,7 +217,7 @@ kb_write mode=node target=<TID> content=…  # 逐条改，或直接改 md 再 k
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 280 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
+node scripts/check.mjs      # 292 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 

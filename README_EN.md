@@ -161,8 +161,23 @@ leave references at every use site, so a single edit updates the whole library.
 
 Hard rules: `<node>` / `</node>` must each occupy an entire line; nothing inside `<tscl>` is parsed
 as structure (a `##` there is not a heading); a `tscl` id may be defined exactly once and must not
-collide with a node TID. The old `[[TID]]` form still works (macro when a definition exists, link
-otherwise) with a `kb_diag` warning, and goes away in 2.0.
+collide with a node TID.
+
+A definition may also sit **inline in the middle of a sentence** — the tags are stripped when
+rendered and the value stays where it is written:
+
+```md
+Current version: <tscl id="fact:ver">v1.23.45</tscl>, backward compatible with v1.22.
+ABI check: [[tscl="fact:ver"]].
+```
+
+An inline definition **must close on the same line** (only a line-start `<tscl>` gets cross-line
+protection), and it must not go into a table row (a `|` inside the body breaks the row; `kb_diag`
+warns). To check one value, `kb_read target=<definition id>` returns the body, where it is defined,
+and who references it.
+
+The old `[[TID]]` form still works (macro when a definition exists, link otherwise) with a
+`kb_diag` warning, and goes away in 2.0.
 
 ## Upgrading from 1.0
 
@@ -188,7 +203,7 @@ kb_write mode=node target=<TID> content=…  # fix one at a time, or edit the md
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 280 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
+node scripts/check.mjs      # 292 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

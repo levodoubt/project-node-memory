@@ -364,6 +364,8 @@ ok('Icon() 返回 svg', (() => {
   ok('CSS 给 .nkb-tablewrap 横向滚动', /\.nkb-tablewrap\{[^}]*overflow-x:auto/.test(clientSrc))
   ok('CSS 给 .nkb-md 兜住 flex 高度（min-height:0）', /\.nkb-md\{[^}]*min-height:0/.test(clientSrc))
   ok('右栏正文有 10000 字符上限', clientSrc.includes('var TEXT_LIMIT = 10000') && clientSrc.includes('已显示前 '))
+  // 原文/源码视图里的 [[tscl="x"]] 必须可点（曾经只有渲染视图能点，原文里是死文本）
+  ok('原文/源码视图把宏点击接到 openDef', /onMacro:\s*openDef/.test(clientSrc) && /function openDef\(/.test(clientSrc))
 }
 
 // LaTeX → MathML
@@ -465,6 +467,25 @@ section('路由 HTTP 端到端')
 
       const bad = await j(`/node?lib=${lib}&tid=${encodeURIComponent('nope:nope')}`)
       ok('找不到节点回 404', bad.status === 404 && typeof bad.body.error === 'string')
+
+      // /defs：面板在“原文/源码”里点 [[tscl="x"]] 时，要知道定义在哪个节点
+      {
+        const defLib = path.join(root, '.tmp-defs')
+        const defKb = path.join(defLib, '.nodekb')
+        fs.rmSync(defLib, { recursive: true, force: true })
+        fs.mkdirSync(path.join(defKb, 'doc'), { recursive: true })
+        fs.writeFileSync(path.join(defKb, 'README.md'), '# 库\n')
+        fs.writeFileSync(path.join(defKb, 'doc/a.md'), '# A\n\n版本：<tscl id="fact:ver">v1.23.45</tscl>\n\n别处 [[tscl="fact:ver"]]。\n')
+        const dlib = encodeURIComponent(path.join('.tmp-defs', '.nodekb'))
+        const d1 = await j(`/defs?lib=${dlib}&id=${encodeURIComponent('fact:ver')}`)
+        ok('GET /defs 200 且给出定义所在节点', d1.status === 200 && d1.body.owner_tid === 'doc:a' && d1.body.body === 'v1.23.45', JSON.stringify(d1.body).slice(0, 140))
+        ok('/defs 列出引用处并带自证文本', d1.body.refs.length === 1 && /定义体/.test(d1.body.text), JSON.stringify(d1.body.refs))
+        const d0 = await j(`/defs?lib=${dlib}`)
+        ok('/defs 无 id 时列出全部定义', d0.status === 200 && d0.body.count === 1 && d0.body.defs[0].owner_tid === 'doc:a', JSON.stringify(d0.body).slice(0, 120))
+        const dMiss = await j(`/defs?lib=${dlib}&id=${encodeURIComponent('fact:none')}`)
+        ok('/defs 找不到定义回 404', dMiss.status === 404)
+        fs.rmSync(defLib, { recursive: true, force: true })
+      }
 
       const srch = await j(`/search?lib=${lib}&q=${encodeURIComponent('拷贝')}`)
       ok('GET /search 有命中且带 text', srch.status === 200 && srch.body.hits.length > 0 && srch.body.text.includes('拷贝'))
@@ -877,6 +898,10 @@ section('tscl 定义与双语法')
       '',
       '单行用 [[tscl="fact:one-line"]] 引用。',
       '',
+      '当前版本号为：<tscl id="fact:ver">v1.23.45</tscl>，向下兼容 v1.22。',
+      '',
+      '另一处引用版本：[[tscl="fact:ver"]]。',
+      '',
       '<tscl id="fact:orphan">没人引用我</tscl>',
       '',
       '## 1 引用处',
@@ -899,10 +924,23 @@ section('tscl 定义与双语法')
   ok('tscl 标签不出现在渲染结果里', !rn.includes('<tscl'), rn.slice(0, 60))
   ok('值嵌入替换成定义体', rn.includes('三条硬规则') && !rn.includes('[[tscl='))
   ok('单行宏也能嵌入', rn.includes('单行定义') && !rn.includes('[[tscl="fact:one-line"]]'))
+  ok('句内定义被收集', defs.get('fact:ver') && defs.get('fact:ver').body === 'v1.23.45', JSON.stringify(defs.get('fact:ver') && defs.get('fact:ver').body))
+  ok('句内定义渲染时标签被剥掉、值就地留下', rn.includes('当前版本号为：v1.23.45，向下兼容 v1.22。'), rn.split('\n').find((l) => l.includes('当前版本号')) || '')
+  ok('句内定义的别处引用被展开', rn.includes('另一处引用版本：v1.23.45。'), rn.split('\n').find((l) => l.includes('另一处引用')) || '')
   ok('node 引用渲染为链接（带行号）', /\[1 小节\]\(doc\/other\.md#L\d+\)/.test(rn), rn.split('\n').find((l) => l.includes('结构')) || '')
   ok('旧语法对节点也渲染成链接', /\[其它\]\(doc\/other\.md/.test(rn), rn.split('\n').find((l) => l.includes('结构')) || '')
   const sub = render_subtree(nodes, 'doc:abi', 1, ctx)
   ok('整支视图不再复制被引用节点的正文', !sub.includes('不该被复制过来'), sub.slice(0, 80))
+
+  // 按定义 id 读（P1）：kb_read target=<tscl id>
+  {
+    const { cmdRead } = await import(url(path.join(root, 'lib/engine/commands.js')))
+    const byDef = cmdRead(nodes, 'fact:one-line', { defs })
+    ok('kb_read 可按定义 id 读', byDef.code === 0 && /定义体/.test(byDef.text) && byDef.text.includes('单行定义'), byDef.text.slice(0, 100))
+    ok('按定义 id 读时列出被引用处', /被引用 1 处/.test(byDef.text), byDef.text.slice(-120))
+    const notFound = cmdRead(nodes, 'fact:nope', { defs })
+    ok('不存在的 id 仍报未找到', notFound.code === 2 && /未找到节点/.test(notFound.text), notFound.text.slice(0, 80))
+  }
 
   // 正常库：定义被引用、无悬空 → 没有 error
   {
@@ -927,6 +965,7 @@ section('tscl 定义与双语法')
     w2('doc/a.md', '# A\n\n<tscl id="fact:dup">甲</tscl>\n\n<tscl id="doc:a">撞名</tscl>\n\n靠 [[tscl="fact:none"]] 引用。\n')
     w2('doc/b.md', '# B\n\n<tscl id="fact:dup">乙</tscl>\n\n<tscl id="fact:multi">\n第一行\n第二行\n</tscl>\n\n| 列 | 说明 |\n|---|---|\n| x | [[tscl="fact:multi"]] |\n')
     w2('doc/c.md', '# C\n\n<tscl id="fact:nested"><tscl id="fact:inner">内</tscl></tscl>\n')
+    w2('doc/d.md', '# D\n\n| 列 | 说明 |\n|---|---|\n| x | <tscl id="fact:intable">甲</tscl> |\n')
     const p2 = []
     const n2 = parse_library(kb2, p2)
     const r2 = diag(n2, { problems: p2 }).report
@@ -936,6 +975,7 @@ section('tscl 定义与双语法')
     ok('diag: 悬空 tscl 引用是 error', /悬空 tscl 引用/.test(all))
     ok('diag: 嵌套 <tscl> 是 error', /嵌套/.test(all))
     ok('diag: 表格里内联跨行宏是 warning', r2.warnings.some((w) => /表格单元格/.test(w)), r2.warnings.slice(0, 2).join(' | '))
+    ok('diag: 定义写在表格行里是 warning', r2.warnings.some((w) => /定义写在表格行里/.test(w)), r2.warnings.slice(0, 3).join(' | '))
     fs.rmSync(tmp2, { recursive: true, force: true })
   }
 
