@@ -163,10 +163,34 @@ as structure (a `##` there is not a heading); a `tscl` id may be defined exactly
 collide with a node TID. The old `[[TID]]` form still works (macro when a definition exists, link
 otherwise) with a `kb_diag` warning, and goes away in 2.0.
 
+## Upgrading from 1.0
+
+The data format is unchanged — Markdown stays Markdown, TIDs stay the same, and the library remains
+readable after the plugin is removed. Only two things changed:
+
+1. **`[[x]]` now renders a link only**; it no longer copies the referenced node's body into the
+   output (use an explicit `<tscl>` for that). References stop inflating rendered size, and
+   positional sections (`## 3.1`) become clickable.
+2. **`kb_init` no longer creates `facts/`.** Existing `facts/` folders are untouched and still
+   readable/searchable; new libraries get `doc/ lessons/ todo/ index/` only, and facts become
+   `<tscl>` definitions inside the `doc/` file they belong to.
+
+Do old libraries need migrating? **No** — they keep working, `kb_diag` just emits one warning per
+bare reference. To migrate:
+
+```text
+kb_migrate                        # dry run: how many refs per file, which ones are already dangling
+kb_migrate dry_run=false          # write
+```
+
+Migration only changes syntax (`[[doc:x]]` → `[[node="doc:x"]]`, or `[[tscl="…"]]` when the id is a
+definition). No TID changes, no file moves, so references and rendered output stay identical; fenced
+code blocks are skipped.
+
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 275 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / prompt section / bundled skill
+node scripts/check.mjs      # 290 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / migration / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

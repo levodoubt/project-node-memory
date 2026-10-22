@@ -184,10 +184,29 @@ config:
 同一 `tscl` id 全库只能定义一次，且不能与节点 TID 同名。
 旧写法 `[[TID]]` 仍兼容（有定义时当宏、否则当链接），`kb_diag` 会 warning，2.0 移除。
 
+## 从 1.0 升到 1.1
+
+数据格式没变——md 还是 md，TID 还是那些 TID，插件卸了照样能读。变化只有两条：
+
+1. **`[[x]]` 现在只出链接**，不再把被引用节点的正文复制进来（要复制原文请显式写 `<tscl>`）。
+   好处是引用不再撑大渲染结果，位置型小节 `## 3.1` 也能点了。
+2. **`kb_init` 不再建 `facts/`**。已有的 `facts/` 不会被动，`kb_read`/`kb_search` 照常；只是新库默认只有
+   `doc/ lessons/ todo/ index/`，事实改写成 `<tscl>` 定义放进它所属的 `doc/` 里。
+
+老库要不要迁？**不迁也能用**，只是 `kb_diag` 会给每条裸引用一条 warning。要迁就跑：
+
+```text
+kb_migrate                        # 演练：报每个文件会改几处、哪些引用本来就悬空
+kb_migrate dry_run=false          # 确认后落盘
+```
+
+迁移只改写法（`[[doc:x]]` → `[[node="doc:x"]]`，命中定义则 `[[tscl="…"]]`），不动任何 TID、不搬文件，
+所以引用关系与渲染结果都不变；围栏代码块内一律跳过。
+
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 275 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / 提示词段落 / 随包技能
+node scripts/check.mjs      # 290 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 迁移 / 提示词段落 / 随包技能
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 
