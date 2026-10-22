@@ -2,15 +2,17 @@
 
 > 简体中文 · [English](README_EN.md)
 
-把 **Markdown 目录当成知识库** 的 DSH 插件：为 Agent 提供 10 个 `kb_*` 工具，为人类提供知识节点面板（侧栏入口名「项目节点知识库」）。
+把 **Markdown 目录当成知识库** 的 DSH 插件：为 Agent 提供 9 个 `kb_*` 工具，为人类提供知识节点面板（侧栏入口名「项目节点知识库」）。
 
 没有索引数据库、没有向量、没有后台进程。完整知识库位于项目下的 `.nodekb/` 目录——一堆 md 文件，删掉插件之后它仍然是普通 md。
+
+本 README 只描述**当前版本**的行为；每个版本的变更记录在 [Releases](https://github.com/levodoubt/project-node-memory/releases)。
 
 ```
 项目/
 └── .nodekb/
     ├── index/entry.md        ## 3.1 编译契约
-    ├── doc/03-build.md       <node name="fact:abi" type="fact">…</node>
+    ├── doc/03-build.md       <tscl id="fact:abi">…</tscl>
     ├── lessons/001.md
     └── diag_ignore.json      可选：豁免样板块
 ```
@@ -92,7 +94,7 @@ config:
 面板只读，数据走宿主侧注册的 `/nodekb/api/*`。写库就是写 md——用 `write` / `edit` 工具，或者 `kb_write`。
 右栏正文单次最多渲染 10000 字符（超出显示截断提示）；宽表格横向滚动，长文本纵向滚动。
 
-## 10 个工具
+## 9 个工具
 
 | 工具            | 干什么                                                                                         |
 | --------------- | ---------------------------------------------------------------------------------------------- |
@@ -196,23 +198,6 @@ ABI 校验见 [[tscl="fact:ver"]]。
 「定义体 / 定义在哪个节点 / 被谁引用」。
 
 旧写法 `[[TID]]` 仍兼容（有定义时当宏、否则当链接），`kb_diag` 会 warning，2.0 移除。
-
-## 从 1.0 升到 1.1
-
-数据格式没变——md 还是 md，TID 还是那些 TID，插件卸了照样能读。变化只有两条：
-
-1. **`[[x]]` 现在只出链接**，不再把被引用节点的正文复制进来（要复制原文请显式写 `<tscl>`）。
-   好处是引用不再撑大渲染结果，位置型小节 `## 3.1` 也能点了。
-2. **`kb_init` 不再建 `facts/`**。已有的 `facts/` 不会被动，`kb_read`/`kb_search` 照常；只是新库默认只有
-   `doc/ lessons/ todo/ index/`，事实改写成 `<tscl>` 定义放进它所属的 `doc/` 里。
-
-老库要不要迁？**不迁也能用**，只是 `kb_diag` 会给每条裸引用一条 warning。要迁就让 Agent 按
-`kb_diag` 的清单逐条改成 `[[node="…"]]` / `[[tscl="…"]]`（只改写法，不动 TID 与文件）：
-
-```text
-kb_diag                                    # 列出每条 `旧语法引用`
-kb_write mode=node target=<TID> content=…  # 逐条改，或直接改 md 再 kb_diag 复验
-```
 
 ## 自检（不装 DSH 也能跑）
 

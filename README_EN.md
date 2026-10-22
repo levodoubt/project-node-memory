@@ -4,7 +4,7 @@
 
 A DSH plugin that treats **a directory of Markdown as a database**: nine `kb_*` tools for the agent, and a center-column panel for humans (sidebar entry: 「项目节点知识库」).
 
-> Renamed from `dsh-nodekb` at 0.2.0. Tool names (`kb_*`) and the on-disk format are unchanged.
+This README describes **the current version only**; per-version changes live in [Releases](https://github.com/levodoubt/project-node-memory/releases).
 
 No index database, no embeddings, no background process. The library *is* the `.nodekb/` directory in your project — a pile of Markdown files that stay ordinary Markdown if you uninstall the plugin.
 
@@ -12,7 +12,7 @@ No index database, no embeddings, no background process. The library *is* the `.
 project/
 └── .nodekb/
     ├── index/entry.md        ## 3.1 Compile contract
-    ├── doc/03-build.md       <node name="fact:abi" type="fact">…</node>
+    ├── doc/03-build.md       <tscl id="fact:abi">…</tscl>
     ├── lessons/001.md
     └── diag_ignore.json      optional: whitelist boilerplate blocks
 ```
@@ -89,7 +89,7 @@ The Markdown renderer is a small home-grown one (headings, lists, code, tables, 
 The panel is read-only; data flows through host routes under `/nodekb/api/*`. Writing a library means writing Markdown — via `write` / `edit`, or `kb_write`.
 The right column renders at most 10,000 characters per view (with a truncation notice); wide tables scroll horizontally and long text scrolls vertically.
 
-## The ten tools
+## The nine tools
 
 | Tool | What it does |
 |---|---|
@@ -178,27 +178,6 @@ and who references it.
 
 The old `[[TID]]` form still works (macro when a definition exists, link otherwise) with a
 `kb_diag` warning, and goes away in 2.0.
-
-## Upgrading from 1.0
-
-The data format is unchanged — Markdown stays Markdown, TIDs stay the same, and the library remains
-readable after the plugin is removed. Only two things changed:
-
-1. **`[[x]]` now renders a link only**; it no longer copies the referenced node's body into the
-   output (use an explicit `<tscl>` for that). References stop inflating rendered size, and
-   positional sections (`## 3.1`) become clickable.
-2. **`kb_init` no longer creates `facts/`.** Existing `facts/` folders are untouched and still
-   readable/searchable; new libraries get `doc/ lessons/ todo/ index/` only, and facts become
-   `<tscl>` definitions inside the `doc/` file they belong to.
-
-Do old libraries need migrating? **No** — they keep working, `kb_diag` just emits one warning per
-bare reference. To migrate, have the agent walk the `kb_diag` list and fix each one (syntax only, no
-TID or file changes):
-
-```text
-kb_diag                                    # lists every `旧语法引用` (legacy bare ref)
-kb_write mode=node target=<TID> content=…  # fix one at a time, or edit the md and re-run kb_diag
-```
 
 ## Self-check (no DSH required)
 
