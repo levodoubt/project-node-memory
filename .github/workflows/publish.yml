@@ -1,12 +1,13 @@
 name: publish
 
-# Releases are cut by pushing a tag:  git tag v1.0.1 && git push origin v1.0.1
+# Releases are cut by pushing a tag:  git tag v1.0.4 && git push origin v1.0.4
 # The workflow then
 #   1. runs the offline self-check,
 #   2. refuses to publish when the tag and package.json disagree,
 #   3. publishes to npm over OIDC (no long-lived token), with provenance,
-#   4. attaches the packed tarball to a GitHub release (the marketplace entry
-#      points its `tarball:` at exactly that asset).
+#   4. attaches the packed tarball to a GitHub release under a stable asset
+#      name, so the marketplace entry can point at
+#      https://github.com/<owner>/<repo>/releases/latest/download/project-node-memory.tgz
 on:
   push:
     tags:
@@ -56,9 +57,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          TARBALL="project-node-memory-${VERSION}.tgz"
           npm pack --pack-destination .
-          gh release create "${GITHUB_REF_NAME}" "${TARBALL}" \
+          # Stable asset name: the marketplace entry points at
+          # releases/latest/download/project-node-memory.tgz, so future
+          # releases do not need a marketplace change.
+          mv "project-node-memory-${VERSION}.tgz" "project-node-memory.tgz"
+          gh release create "${GITHUB_REF_NAME}" "project-node-memory.tgz" \
             --verify-tag \
             --title "project-node-memory ${VERSION}" \
             --notes "npm: https://www.npmjs.com/package/project-node-memory/v/${VERSION}"
