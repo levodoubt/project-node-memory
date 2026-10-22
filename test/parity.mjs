@@ -87,11 +87,21 @@ check(
 }
 
 // 未命中 → 候选列表 + code 2
+// 注意：1.4.2 起 JS 侧接受前缀兜底（doc:inde → doc:index），Python 仍严格匹配，
+// 这是**有意的分叉**；这里用一个必然不存在的名字测「未命中」语义本身。
 {
-  const got = cmdRead(nodes, 'doc:inde', {})
-  const expect = py(['read', 'doc:inde']).trim()
+  const got = cmdRead(nodes, 'doc:nosuch', {})
+  const expect = py(['read', 'doc:nosuch']).trim()
   check('read 未命中', expect, got.text)
   check('read 未命中 code', 2, got.code)
+}
+
+// 有意的分叉：前缀能命中唯一的文件节点（Python 侧是 error，JS 侧是 200）
+{
+  const got = cmdRead(nodes, 'doc:inde', {})
+  check('前缀兜底：JS 命中文件节点', true, got.code === 0 && got.text.startsWith('# 工程索引'))
+  const pyGot = py(['read', 'doc:inde']).trim()
+  check('前缀兜底：Python 仍报未找到（预期分叉）', true, pyGot.startsWith('未找到节点'))
 }
 
 // 整支超上限

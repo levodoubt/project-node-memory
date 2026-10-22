@@ -624,7 +624,10 @@ try {
       ['doc:x', { tid: 'doc:x', title: 'x', content: '句子 <tscl id="v">1.2</tscl> 与 [[tscl="v"]]', source: 'doc/x.md#L1-L9' }],
     ])
     const fdefs = collectDefs(fakeNodes).defs
-    ok('定义所在节点不算引用者', refsToDef(fakeNodes, 'v', fdefs.get('v').ownerTid).length === 0)
+    const selfOnly = refsToDef(fakeNodes, 'v', fdefs.get('v').ownerTid)
+    ok('定义所在节点自己引用：记下来但标 self', selfOnly.length === 1 && selfOnly[0].self === true)
+    const selfText = formatDefRead(fdefs.get('v'), selfOnly)
+    ok('self 引用不计入引用数', /尚未被任何/.test(selfText) && /自己也引用了 1 次/.test(selfText), selfText.split('\n').slice(-1)[0])
     const withRef = formatDefRead(fdefs.get('v'), [{ tid: 'doc:y', title: 'y', source: 'doc/y.md#L4-L9', line: 2 }])
     ok('引用行号只拼一次', /doc\/y\.md#L2/.test(withRef) && !/#L9#L/.test(withRef), withRef.split('\n').slice(-1)[0])
   } finally {
@@ -1075,8 +1078,143 @@ section('tscl 定义与双语法')
   }
   ok('kb_register 拒绝没有 .nodekb 的目录', /没有 \.nodekb/.test(noKbErr), noKbErr.slice(0, 80))
 
+  // 登记后必须立刻生效（不能只在启动时读一次注册表）
+  const afterReg = await t2.kb_list.execute({}, { agent: { id: 's-1' } })
+  ok('kb_register 后立刻出现在 kb_list', afterReg.libs.some((r) => r.name === 'other'), JSON.stringify(afterReg.libs.map((r) => r.name)))
+  const readOther = await t2.kb_read.execute({ kb: 'other' }, { agent: { id: 's-1' } })
+  ok('kb_register 后立刻能按名字读', /别人的库/.test(readOther.text), readOther.text.slice(0, 60))
+
   fs.rmSync(wsRoot, { recursive: true, force: true })
   fs.rmSync(otherWs, { recursive: true, force: true })
+}
+
+// ── 手写 <node> 的容错 + 代码区不解析引用 + 前缀匹配（1.4.2）──────────────
+{
+  section('手写 <node> 与代码区（1.4.2）')
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const tmp2 = path.join(root, '.tmp-node-syntax')
+  fs.rmSync(tmp2, { recursive: true, force: true })
+  const kb2 = path.join(tmp2, '.nodekb')
+  fs.mkdirSync(path.join(kb2, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(kb2, 'README.md'), '# 库\n', 'utf8')
+  // tid= 是 name= 的别名（用户反馈里就是这么写的）
+  fs.writeFileSync(path.join(kb2, 'doc/tid-attr.md'), '<node tid="doc:tid-attr:x1" type="fact" title="别名">\n正文\n</node>\n', 'utf8')
+  // 缺 name 的 <node>：整段按正文处理，闭标签不许漏
+  fs.writeFileSync(path.join(kb2, 'doc/nameless.md'), '# Nameless\n\n<node type="fact">\n没有名字\n</node>\n\n## 1 小节\n\n正文\n', 'utf8')
+  // 代码区里的引用与定义都是示例
+  fs.writeFileSync(
+    path.join(kb2, 'doc/code.md'),
+    '# Code\n\n```md\n[[node="doc:missing-fenced"]]\n<tscl id="dup:in-fence">示例</tscl>\n```\n\n行内 `[[node="doc:missing-inline"]]` 也只是示例。\n',
+    'utf8',
+  )
+  // 前缀匹配：文件名带后缀 + 文件内有子节
+  fs.writeFileSync(path.join(kb2, 'doc/02-运行环境.md'), '# 运行环境\n\n## 2.1 版本\n\n正文\n', 'utf8')
+
+  const lib2 = openLibrary({}, { workspace: tmp2 }, { lib: kb2 })
+  ok('tid= 属性也能建显式节点', lib2.nodes.has('doc:tid-attr:x1'))
+  ok('title= 属性生效', lib2.nodes.get('doc:tid-attr:x1').title === '别名', lib2.nodes.get('doc:tid-attr:x1').title)
+  const nameless = lib2.nodes.get('doc:nameless')
+  ok('缺 name 的 <node> 行按正文保留', String(nameless.content).includes('<node type="fact">'), nameless.content.slice(0, 40))
+  ok('闭标签不漏进正文', !String(nameless.content).includes('</node>'), nameless.content.slice(0, 60))
+  ok('缺 name 记成解析期 warning', lib2.problems.some((p) => /显式节点缺/.test(p)), JSON.stringify(lib2.problems))
+
+  const { diag: diag2 } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const d2 = diag2(lib2.nodes, { problems: lib2.problems, defs: lib2.defs })
+  ok('代码区里的悬空引用不报错', d2.report.errors.length === 0, JSON.stringify(d2.report.errors))
+  ok('代码区里的定义不算定义', !lib2.defs.has('dup:in-fence'), [...lib2.defs.keys()].join(','))
+  ok('缺 name 是 warning 不是 error', d2.report.warnings.some((w) => /显式节点缺/.test(w)), JSON.stringify(d2.report.warnings))
+
+  const { resolve_path: rp2 } = await import(url(path.join(root, 'lib/engine/render.js')))
+  ok('前缀匹配到文件节点（有子节也认）', rp2(lib2.nodes, 'doc:02') === 'doc:02-运行环境', String(rp2(lib2.nodes, 'doc:02')))
+  ok('前缀匹配到节', rp2(lib2.nodes, 'doc:02-运行环境:2') === 'doc:02-运行环境:2.1', String(rp2(lib2.nodes, 'doc:02-运行环境:2')))
+  fs.rmSync(tmp2, { recursive: true, force: true })
+}
+
+// ── 定义行号与自引用（1.4.2）────────────────────────────────────────────
+{
+  section('tscl 引用归因（1.4.2）')
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const tmp3 = path.join(root, '.tmp-def-line')
+  fs.rmSync(tmp3, { recursive: true, force: true })
+  const kb3 = path.join(tmp3, '.nodekb')
+  fs.mkdirSync(path.join(kb3, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(kb3, 'README.md'), '# 库\n', 'utf8')
+  fs.writeFileSync(
+    path.join(kb3, 'doc/02-env.md'),
+    '# 环境\n\n## 2.1 版本\n\n当前 <tscl id="fact:ver">1.2.3</tscl> 与 [[tscl="fact:ver"]]\n',
+    'utf8',
+  )
+  fs.writeFileSync(path.join(kb3, 'doc/03-use.md'), '# 使用\n\n引用：[[tscl="fact:ver"]]\n', 'utf8')
+  const lib3 = openLibrary({}, { workspace: tmp3 }, { lib: kb3 })
+  const { refsToDef: r2 } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  const def3 = lib3.defs.get('fact:ver')
+  const refs3 = r2(lib3.nodes, 'fact:ver', def3.ownerTid)
+  const useRef = refs3.find((r) => r.tid === 'doc:03-use')
+  ok('真实引用被找到', Boolean(useRef), JSON.stringify(refs3.map((r) => r.tid)))
+  ok('行号是文件内绝对行号', useRef && useRef.line === 3, useRef && String(useRef.line))
+  const owner = refs3.filter((r) => r.self)
+  ok('定义所在节点标 self', owner.length === 1, JSON.stringify(refs3.map((r) => [r.tid, r.self])))
+  fs.rmSync(tmp3, { recursive: true, force: true })
+}
+
+// ── mode=node 死锁 + kb_backlinks 认定义 id + 整支不重复打印值（1.4.4）──────
+{
+  section('mode=node 与 backlinks（1.4.4）')
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  const tmp4 = path.join(root, '.tmp-node-write')
+  fs.rmSync(tmp4, { recursive: true, force: true })
+  const kb4 = path.join(tmp4, '.nodekb')
+  fs.mkdirSync(path.join(kb4, 'lessons'), { recursive: true })
+  fs.writeFileSync(path.join(kb4, 'README.md'), '# 库\n', 'utf8')
+  const file4 = path.join(kb4, 'lessons/tmp-node-test.md')
+  fs.writeFileSync(file4, '前言\n', 'utf8')
+
+  const ctx4 = {
+    tools: { register: (t) => { tools4[t.name] = t; return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-4' ? { header: { cwd: tmp4 } } : null) } : null),
+  }
+  const tools4 = {}
+  buildTools(ctx4, {})
+  const ex = { agent: { id: 's-4' } }
+
+  // 多行 <node>：开标签/正文/闭标签各占一行 —— 旧实现死锁的形状
+  await tools4.kb_write.execute(
+    { target: 'lessons/tmp-node-test.md', mode: 'append', content: '<node name="tmp:x1" type="tmp">\n第一版\n</node>\n' },
+    ex,
+  )
+  const before = openLibrary(ctx4, ex, {})
+  ok('多行 <node> 被注册', before.nodes.has('tmp:x1'), [...before.nodes.keys()].join(','))
+
+  const w = await tools4.kb_write.execute({ target: 'tmp:x1', mode: 'node', content: '第二版内容' }, ex)
+  const after = fs.readFileSync(file4, 'utf8')
+  ok('mode=node 能改写多行 <node>', /第二版内容/.test(after) && !/第一版/.test(after), after.replace(/\n/g, '\\n').slice(0, 80))
+  ok('<node> 标签未被破坏', after.includes('<node name="tmp:x1"') && after.includes('</node>'))
+  ok('改写回执不报错', !/无法定位|\u9519/.test(String(w.text || '')), String(w.text).slice(0, 60))
+
+  // 单行 <node …>正文</node> 也能就地改
+  fs.writeFileSync(path.join(kb4, 'lessons/one-line.md'), '<node name="tmp:one" type="tmp">旧值</node>\n', 'utf8')
+  await tools4.kb_write.execute({ target: 'tmp:one', mode: 'node', content: '新值' }, ex)
+  const oneLine = fs.readFileSync(path.join(kb4, 'lessons/one-line.md'), 'utf8')
+  ok('mode=node 也能改单行 <node>', /新值/.test(oneLine) && !/旧值/.test(oneLine), oneLine.trim())
+
+  // kb_backlinks 认 <tscl> 定义 id（与 kb_read 同口径）
+  fs.writeFileSync(path.join(kb4, 'lessons/defs.md'), '# Defs\n\n句内 <tscl id="fact:pv">1.2.3</tscl> 与 [[tscl="fact:pv"]]\n', 'utf8')
+  fs.writeFileSync(path.join(kb4, 'lessons/use.md'), '# Use\n\n见 [[tscl="fact:pv"]]\n', 'utf8')
+  const bl = await tools4.kb_backlinks.execute({ target: 'fact:pv' }, ex)
+  ok('kb_backlinks 认定义 id', /引用定义/.test(String(bl.text)) && bl.count === 1, String(bl.text).slice(0, 120))
+  ok('kb_backlinks 认出真正的引用节点', String(bl.text).includes('lessons:use'), String(bl.text))
+
+  // 整支渲染：定义与引用都在同一支时值只出现一次
+  const { render_subtree } = await import(url(path.join(root, 'lib/engine/render.js')))
+  const lib5 = openLibrary(ctx4, ex, {})
+  const full = render_subtree(lib5.nodes, 'lessons:defs', 1, { defs: lib5.defs, libRoot: lib5.nodekb })
+  const hits = (full.match(/1\.2\.3/g) || []).length
+  ok('整支里同一个值只出现一次', hits === 1, `出现 ${hits} 次: ${full.replace(/\n/g, ' ').slice(0, 120)}`)
+  ok('单看定义所在节点仍能看到值', /1\.2\.3/.test(full))
+
+  fs.rmSync(tmp4, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
