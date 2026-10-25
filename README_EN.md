@@ -102,7 +102,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_register` | Register an existing library in the **project's own** `kb_registry.json` (never the global registry or the plugin config) |
 | `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block or `##` section in place); validates, self-checks, **auto-snapshots** on success |
 | `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
-| `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (`kb_write` / `kb_rename` snapshot automatically; explains itself when git is missing) |
+| `kb_vcs_status` | Recent snapshots + uncommitted changes of the library's embedded git repo (`count` defaults to 5); `kb_write` / `kb_rename` snapshot automatically, `git: false` turns it off; explains itself when git is missing |
 
 ### The three tiers of `kb_diag`
 
@@ -201,7 +201,7 @@ The old `[[TID]]` form still works (macro when a definition exists, link otherwi
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 292 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
+node scripts/check.mjs      # 377 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

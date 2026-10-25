@@ -58,6 +58,13 @@ ok('files 白名单含 cordis.patch.yml', Array.isArray(pkg.files) && pkg.files.
 const patch = fs.readFileSync(path.join(root, 'cordis.patch.yml'), 'utf8')
 ok('patch 里 name 是包名', new RegExp(`name:\\s*${pkg.name}\\b`).test(patch), patch.trim())
 
+// BOM 会让宿主读 JSON 时直接报 Unexpected token —— 所有清单/JSON 必须是「无 BOM 的 UTF-8」
+const jsonFiles = ['package.json', 'cordis.patch.yml']
+for (const f of jsonFiles) {
+  const buf = fs.readFileSync(path.join(root, f))
+  ok(`${f} 没有 UTF-8 BOM`, buf[0] !== 0xef, `${f} 以 ${buf.slice(0, 3).toString('hex')} 开头`)
+}
+
 // ── 2. 源码不得 import 运行时 ───────────────────────────────────────────────
 section('源码卫生')
 for (const file of walk(path.join(root, 'lib'))) {
@@ -1280,17 +1287,84 @@ section('tscl 定义与双语法')
   ok('diag 报出 advice 数组', Array.isArray(dr.report.advice) && dr.report.advice.length === adv.length)
   ok('advice 不影响退出码', dr.code === 0, `code=${dr.code}`)
 
-  // 更新提醒：状态文件不存在 → 不提醒；写了旧版本 → 提醒一次
+  // 更新提醒：状态文件不存在（1.5.0 之前建的库）→ 提醒一次；写了旧版本 → 提醒一次
   const n0 = updateNotice(kbA)
-  ok('首次（无状态）不提醒', n0 === null, JSON.stringify(n0))
+  ok('无状态文件（旧库）也提醒一次', n0 && n0.code === 'plugin-updated' && /1\.5\.0 之前/.test(n0.message), JSON.stringify(n0))
   markSeen(kbA)
   ok('markSeen 写出状态文件', fs.existsSync(path.join(kbA, '.plugin-state.json')))
   ok('markSeen 把状态文件加进 .gitignore', fs.readFileSync(path.join(kbA, '.gitignore'), 'utf8').includes('.plugin-state.json'))
+  ok('提醒后即视为已看', updateNotice(kbA) === null)
   fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.1' }), 'utf8')
   const n1 = updateNotice(kbA)
   ok('版本变化时提醒一次', n1 && n1.code === 'plugin-updated' && /0\.0\.1/.test(n1.message), JSON.stringify(n1))
-  ok('提醒后即视为已看', updateNotice(kbA) === null)
+  ok('提醒后即视为已看（第二次）', updateNotice(kbA) === null)
+
+  // 缺 H1：文件节点的 source 是绝对路径，检测必须直接读它（不能 join 库根）
+  fs.writeFileSync(path.join(kbA, 'doc/nohead.md'), '这页没有一级标题。\n', 'utf8')
+  const libA2 = openLibrary(ctxA, { agent: { id: 's-a' } }, {})
+  const adv2 = computeAdvice(libA2.nodes, libA2.defs, libA2.nodekb)
+  ok('advice：缺 H1 能被检出（绝对路径）', adv2.some((a) => a.code === 'missing-h1'), JSON.stringify(adv2.map((a) => a.code)))
   fs.rmSync(tmpA, { recursive: true, force: true })
+}
+
+// ── 12. 1.5.1 回归：git:false 真的关、tid 属性跟着改名、快照历史、陈旧 TID 前缀 ──
+{
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  const { init: gitInit } = await import(url(path.join(root, 'lib/engine/vcs.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+
+  const tmpG = path.join(root, '.tmp-151')
+  fs.rmSync(tmpG, { recursive: true, force: true })
+  const kbG = path.join(tmpG, '.nodekb')
+  fs.mkdirSync(path.join(kbG, 'doc'), { recursive: true })
+  const page = (v) => `# A\n\n## 1 版本\n\n${v}\n\n<node tid="doc:a:bad" name="doc:a:bad">\n坏前缀\n</node>\n`
+  fs.writeFileSync(path.join(kbG, 'doc/a.md'), page('v1'), 'utf8')
+  gitInit(kbG)
+
+  const reg = new Map()
+  const plain = { register: (t) => { reg.set(t.name, t); return () => {} } }
+  const ctxG = {
+    tools: plain,
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-g' ? { header: { cwd: tmpG } } : null) } : null),
+  }
+  buildTools(ctxG, { git: false })
+  const execG = { agent: { id: 's-g' } }
+  ok('git:false 时 10 个工具照常注册', reg.size === 10, `size=${reg.size}`)
+
+  const before = execFileSync('git', ['-C', kbG, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()
+  const wr = await reg.get('kb_write').execute({ target: 'doc/a.md', content: page('v2'), mode: 'replace' }, execG)
+  const after = execFileSync('git', ['-C', kbG, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()
+  ok('config.git=false 关掉 autosnap', !wr.snapshot && after === before, `before=${before} after=${after}`)
+
+  // 改名：文件里的 <node tid="doc:a:…"> 必须跟着改，否则文件 TID 变了、嵌套节点还叫旧名
+  const rn = await reg.get('kb_rename').execute({ target: 'doc/a.md', new_name: 'c.md' }, execG)
+  const renamed = fs.readFileSync(path.join(kbG, 'doc/c.md'), 'utf8')
+  ok('改名会重写 tid= 属性', renamed.includes('doc:c:bad') && !renamed.includes('doc:a:bad'), renamed.split('\n').slice(4, 7).join('|'))
+  ok('改名回执不再谎报“没有需要改写的引用”', !/没有需要改写的引用/.test(rn.text), rn.text.split('\n')[0])
+
+  // 换成默认配置（开快照）再写一次：快照历史要有内容
+  const reg2 = new Map()
+  buildTools({ ...ctxG, tools: { register: (t) => { reg2.set(t.name, t); return () => {} } } }, {})
+  await reg2.get('kb_write').execute({ target: 'doc/c.md', content: page('v3'), mode: 'replace' }, execG)
+  const vcs = await reg2.get('kb_vcs_status').execute({}, execG)
+  ok('kb_vcs_status 返回快照历史', Array.isArray(vcs.history) && vcs.history.length >= 1, JSON.stringify(vcs.history))
+  ok('快照历史里是 autosnap 提交', vcs.history.some((l) => /autosnap: \d+ 处变更/.test(l)), JSON.stringify(vcs.history))
+  const vcs1 = await reg2.get('kb_vcs_status').execute({ count: 1 }, execG)
+  ok('kb_vcs_status 支持 count', vcs1.history.length === 1, JSON.stringify(vcs1.history))
+
+  // 陈旧 TID 前缀：前缀指向不存在的节点、但上一级是目录 → warning
+  fs.writeFileSync(path.join(kbG, 'doc/s.md'), '# S\n\n<node tid="doc:zzz:bad" name="doc:zzz:bad">\n旧名残留\n</node>\n', 'utf8')
+  const libG = openLibrary(ctxG, execG, {})
+  const dg = diag(libG.nodes, { libRoot: libG.nodekb, defs: libG.defs })
+  ok('diag 报出陈旧 TID 前缀', dg.report.warnings.some((w) => /TID 前缀指向不存在的节点/.test(w)), JSON.stringify(dg.report.warnings.slice(0, 3)))
+  // 误把项目根当库时不能提交（踩过：项目历史里多了 autosnap 提交）
+  const vcsMod = await import(url(path.join(root, 'lib/engine/vcs.js')))
+  ok('非 .nodekb 目录不初始化 git', /不是 \.nodekb/.test(vcsMod.init(tmpG)), vcsMod.init(tmpG))
+  ok('非 .nodekb 目录不自动快照', vcsMod.maybeAutosnap(tmpG) === null)
+
+  fs.rmSync(tmpG, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

@@ -107,7 +107,7 @@ config:
 | `kb_register`   | 把已有的库登记进**项目自己**的 `kb_registry.json`（不写全局表、不改配置）                      |
 | `kb_write`      | 写库：`append` / `replace` / `create` / `node`（就地改写一个 `<node>` 块或 `##` 段）；写前校验、写后自检、**成功后自动快照** |
 | `kb_rename`     | 文件改名 + 全库引用一起改写；写前重读，别人刚改的不覆盖                                        |
-| `kb_vcs_status` | 库内嵌 git 的快照历史与未提交改动（`kb_write` / `kb_rename` 成功后自动快照；git 缺失时只说明，不报错） |
+| `kb_vcs_status` | 内嵌 git 的最近几条快照 + 未提交改动（`count` 默认 5）；`kb_write` / `kb_rename` 成功后自动快照，`git: false` 可关；git 缺失时只说明，不报错 |
 
 ### 自检的三档
 
@@ -231,7 +231,7 @@ ABI 校验见 [[tscl="fact:ver"]]。
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 292 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
+node scripts/check.mjs      # 377 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 
