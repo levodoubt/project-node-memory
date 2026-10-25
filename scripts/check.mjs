@@ -16,6 +16,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const url = (p) => pathToFileURL(p).href
@@ -1213,6 +1214,41 @@ section('tscl 定义与双语法')
   const hits = (full.match(/1\.2\.3/g) || []).length
   ok('整支里同一个值只出现一次', hits === 1, `出现 ${hits} 次: ${full.replace(/\n/g, ' ').slice(0, 120)}`)
   ok('单看定义所在节点仍能看到值', /1\.2\.3/.test(full))
+
+  // ── 1.4.5：段节点可写 + 写入后自动快照 ──────────────────────────────────
+  fs.writeFileSync(path.join(kb4, 'lessons/sec.md'), '# Sec\n\n## 1 版本\n\n旧正文\n\n## 2 其它\n\n无关内容\n', 'utf8')
+  const secFile = (n, name) => n.kind === 'section' && String(n.source).split('#')[0].split(/[\\/]/).pop() === name
+  const lib6 = openLibrary(ctx4, ex, {})
+  const sec = [...lib6.nodes.values()].find((n) => secFile(n, 'sec.md'))
+  ok('段节点在册', Boolean(sec), sec && sec.tid)
+  const sw = await tools4.kb_write.execute({ target: sec.tid, mode: 'node', content: '新正文二' }, ex)
+  const secText = fs.readFileSync(path.join(kb4, 'lessons/sec.md'), 'utf8')
+  ok('mode=node 能改 ## 段正文', /新正文二/.test(secText) && !/旧正文/.test(secText), secText.replace(/\n/g, '\\n'))
+  ok('段的标题与相邻段没被碰', secText.includes('## 1 版本') && secText.includes('## 2 其它') && /无关内容/.test(secText), secText.replace(/\n/g, '\\n'))
+  ok('段写入回执正常', /已写入/.test(String(sw.text)), String(sw.text).slice(0, 80))
+
+  // 段里有 <node>：拒绝整段替换，而不是静默删掉
+  fs.writeFileSync(path.join(kb4, 'lessons/sec2.md'), '# Sec2\n\n## 1 含节点\n\n<node name="tmp:in" type="tmp">\n内\n</node>\n', 'utf8')
+  const lib7 = openLibrary(ctx4, ex, {})
+  const sec2 = [...lib7.nodes.values()].find((n) => secFile(n, 'sec2.md'))
+  let guardErr = null
+  try {
+    await tools4.kb_write.execute({ target: sec2.tid, mode: 'node', content: '想覆盖' }, ex)
+  } catch (e) {
+    guardErr = e
+  }
+  ok('段内有 <node> 时拒绝整段替换', guardErr !== null && /拒绝/.test(guardErr.message), guardErr && guardErr.message.slice(0, 90))
+  ok('拒绝后原文还在', /内/.test(fs.readFileSync(path.join(kb4, 'lessons/sec2.md'), 'utf8')) && lib7.nodes.has('tmp:in'))
+
+  // 自动快照：git 初始化后写入 → autosnap 提交
+  const { init: vcsInit, status: vcsStatus } = await import(url(path.join(root, 'lib/engine/vcs.js')))
+  const gitMsg = vcsInit(kb4)
+  ok('vcs.init 建出仓库', vcsStatus(kb4).repo === true, gitMsg)
+  const w2 = await tools4.kb_write.execute({ target: 'lessons/snap.md', mode: 'create', content: '# Snap\n\n快照测试\n' }, ex)
+  ok('写入后回了快照', /快照:/.test(String(w2.text)), String(w2.text).split('\n').slice(0, 3).join(' | '))
+  const snapLog = execFileSync('git', ['-C', kb4, 'log', '--pretty=%s', '-n', '3'], { encoding: 'utf8' }).trim()
+  ok('git log 里有 autosnap', /autosnap: \d+ 处变更/.test(snapLog), snapLog.replace(/\n/g, ' | '))
+  ok('工作树干净（已全部提交）', vcsStatus(kb4).dirty === false, JSON.stringify(vcsStatus(kb4)))
 
   fs.rmSync(tmp4, { recursive: true, force: true })
 }
