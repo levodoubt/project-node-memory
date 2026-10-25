@@ -1400,6 +1400,12 @@ section('tscl 定义与双语法')
   ok('advice：重复字面值被建议提取 tscl', adv.some((a) => a.code === 'extract-tscl'))
   ok('advice：缺入口被建议补', adv.some((a) => a.code === 'missing-entry'))
   ok('advice 每条都带 fix', adv.every((a) => typeof a.fix === 'string' && a.fix.length > 10))
+
+  // 文案口径：extract-tscl 嵌的原句不超过 40 字（样例路径的断言放在工作树检查之后）
+  const ext = adv.find((a) => a.code === 'extract-tscl')
+  const quoted = (String(ext.fix).match(/「([^」]*)」/) || [])[1] || ''
+  ok('extract-tscl 嵌的原句 ≤ 40 字', quoted.length <= 40, `${quoted.length} 字`)
+  ok('extract-tscl 附带「可无视本 advice」', /可无视本 advice/.test(ext.fix))
   const dr = diag(libA.nodes, { libRoot: libA.nodekb, defs: libA.defs, advice: adv })
   ok('diag 报出 advice 数组', Array.isArray(dr.report.advice) && dr.report.advice.length === adv.length)
   ok('advice 不影响退出码', dr.code === 0, `code=${dr.code}`)
@@ -1450,6 +1456,13 @@ section('tscl 定义与双语法')
   const n1 = updateNotice(kbA)
   ok('版本变化时提醒一次', n1 && n1.code === 'plugin-updated' && /0\.0\.1/.test(n1.message), JSON.stringify(n1))
   ok('提醒后即视为已看（第二次）', updateNotice(kbA) === null)
+
+  // 文案口径：missing-h1 的样例必须是库内相对路径（与回执/报错口径一致）
+  fs.writeFileSync(path.join(kbA, 'doc/no-head.md'), '没有任何标题的文件。\n', 'utf8')
+  const libH1 = openLibrary(ctxA, { agent: { id: 's-a' } }, {})
+  const advH1 = computeAdvice(libH1.nodes, libH1.defs, libH1.nodekb)
+  const h1 = advH1.find((a) => a.code === 'missing-h1')
+  ok('missing-h1 样例是库内相对路径', h1 && /如 doc\/no-head\.md/.test(h1.message), h1 && h1.message)
 
   // 缺 H1：文件节点的 source 是绝对路径，检测必须直接读它（不能 join 库根）
   fs.writeFileSync(path.join(kbA, 'doc/nohead.md'), '这页没有一级标题。\n', 'utf8')
@@ -1783,6 +1796,100 @@ section('tscl 定义与双语法')
   ok('这一轮折腾后库里没有 error', dgE.report.errors.length === 0, JSON.stringify(dgE.report.errors).slice(0, 200))
 
   fs.rmSync(tmpE, { recursive: true, force: true })
+}
+
+// ── 15. 1.5.6 回归：校验误拒 / 空行累积 / 诊断盲区 / 提示与快照（反馈6） ─────────
+{
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { writeInto } = await import(url(path.join(root, 'lib/engine/write.js')))
+  const { renameFileNode } = await import(url(path.join(root, 'lib/engine/rename.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+
+  const tmpG = path.join(root, '.tmp-f6')
+  fs.rmSync(tmpG, { recursive: true, force: true })
+  const kbG = path.join(tmpG, '.nodekb')
+  fs.mkdirSync(path.join(kbG, 'doc'), { recursive: true })
+  const oneAbs = path.join(kbG, 'doc/one.md')
+  fs.writeFileSync(oneAbs, '# One\n\n正文。\n', 'utf8')
+  const libG = { nodekb: kbG, nodes: parse_library(kbG, []) }
+  const attempt = (fn) => {
+    try {
+      return fn()
+    } catch (e) {
+      return e
+    }
+  }
+
+  // ① 校验误拒：「行首定义 + 同行后缀」的 tscl 解析器认，校验器也必须认
+  const tsclOk = attempt(() => writeInto(libG, { target: 'doc/one.md', content: '<tscl id="v6">1</tscl> 后面带说明\n', mode: 'append' }))
+  ok('行首定义 + 同行后缀的 tscl 不再被误判成未闭合', !(tsclOk instanceof Error), tsclOk instanceof Error ? tsclOk.message.slice(0, 90) : '')
+  ok('定义原文写进去了', fs.readFileSync(oneAbs, 'utf8').includes('<tscl id="v6">1</tscl> 后面带说明'))
+
+  // 单行 <node …>正文</node>：解析器支持，写进去也不能被「必须独占一行」挡掉
+  const inlineNode = attempt(() => writeInto(libG, { target: 'doc/one.md', content: '<node name="inline6">一行节点正文</node>\n', mode: 'append' }))
+  ok('单行 <node …>正文</node> 被接受', !(inlineNode instanceof Error), inlineNode instanceof Error ? inlineNode.message.slice(0, 90) : '')
+  libG.nodes = parse_library(kbG, [])
+  ok('单行节点真的进了库', libG.nodes.has('inline6'), [...libG.nodes.keys()].join(','))
+
+  // 真的没闭合还是得拒（口径收紧不能收成「什么都放行」）
+  const tsclBad = attempt(() => writeInto(libG, { target: 'doc/one.md', content: '<tscl id="v7">\n正文没闭合\n', mode: 'append' }))
+  ok('多行 tscl 未闭合仍被拒', tsclBad instanceof Error && /tscl/.test(tsclBad.message), tsclBad instanceof Error ? tsclBad.message.slice(0, 80) : '')
+
+  // ② 段写入不再一次长一个空行
+  const sec6Abs = path.join(kbG, 'doc/sec6.md')
+  fs.writeFileSync(sec6Abs, ['# Sec6', '', '## 1. 甲', '', '第1版。', '', '', '## 2. 乙', '', '乙正文。', ''].join('\n'), 'utf8')
+  for (const v of ['第2版。', '第3版。', '第4版。']) {
+    writeInto({ nodekb: kbG, nodes: parse_library(kbG, []) }, { target: 'doc:sec6:1', content: v })
+  }
+  const sec6Mid = fs.readFileSync(sec6Abs, 'utf8')
+  ok('连续写同一段不再累积空行', !sec6Mid.includes('\n\n\n'), JSON.stringify(sec6Mid.replace(/\n/g, '|')))
+  ok('段写入后兄弟段仍在', sec6Mid.includes('## 2. 乙') && sec6Mid.includes('第4版。'))
+
+  for (const v of ['乙第2版。', '乙第3版。', '乙第4版。']) {
+    writeInto({ nodekb: kbG, nodes: parse_library(kbG, []) }, { target: 'doc:sec6:2', content: v })
+  }
+  const sec6Eof = fs.readFileSync(sec6Abs, 'utf8')
+  ok('EOF 处的段写入不累积尾部空行', /乙第4版。\n$/.test(sec6Eof), JSON.stringify(sec6Eof.slice(-26)))
+
+  // ③ 诊断盲区：手改 / 合并 / replace 进来的坏结构必须有 warning
+  fs.writeFileSync(path.join(kbG, 'doc/open6.md'), '# Open6\n\n<node name="abi6">\n没闭合\n\n## 2. 段二\n\n内容。\n', 'utf8')
+  fs.writeFileSync(path.join(kbG, 'doc/tscl6.md'), '# Tscl6\n\n<tscl id="v8">\n没闭合\n\n## 2. 段三\n\n内容。\n', 'utf8')
+  const probs6 = []
+  const nodes6 = parse_library(kbG, probs6)
+  const dg6 = diag(nodes6, { problems: probs6, libRoot: kbG, defs: new Map() })
+  const errs6 = dg6.report.errors.join('\n')
+  ok('未闭合的 node 被诊断成 error（内容真的丢了，不是疑似漂移）', /未闭合的 <node>/.test(errs6), errs6.slice(0, 120))
+  ok('未闭合的 tscl 被诊断成 error', /未闭合的 <tscl>/.test(errs6), errs6.slice(0, 120))
+  fs.rmSync(path.join(kbG, 'doc/open6.md'), { force: true })
+  fs.rmSync(path.join(kbG, 'doc/tscl6.md'), { force: true })
+
+  // ④ 大写扩展名的提示必须给一个真能用的名字
+  const upper6 = attempt(() => writeInto(libG, { target: 'notes/y.MD', content: 'x\n' }))
+  ok('大写扩展名提示给的是可用名字', upper6 instanceof Error && /notes\/y\.md/.test(upper6.message) && !/y\.MD/.test(upper6.message), upper6 instanceof Error ? upper6.message.slice(0, 90) : '')
+
+  // ⑤ 撞名报错给库内相对路径，不是绝对路径
+  fs.writeFileSync(path.join(kbG, 'doc/z1.md'), '# Z1\n', 'utf8')
+  fs.writeFileSync(path.join(kbG, 'doc/z 2.md'), '# Z2\n', 'utf8')
+  libG.nodes = parse_library(kbG, [])
+  const clash6 = attempt(() => renameFileNode(libG, 'doc:z1', 'z 2'))
+  ok('撞名报错给库内相对路径', clash6 instanceof Error && /doc\/z 2\.md/.test(clash6.message) && !/[A-Za-z]:\//.test(clash6.message), clash6 instanceof Error ? clash6.message.slice(0, 100) : '')
+
+  // ⑥ 正文里用行内代码提到标签是在讲语法，不能被当成嵌套开标签（文档天天这么写）
+  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  fs.writeFileSync(path.join(kbG, 'doc/prose6.md'), '# Prose6\n\n提到 `<tscl>` 与 `<node>` 是在讲语法，不是标签。\n', 'utf8')
+  const prose6 = collectDefs(parse_library(kbG, []))
+  ok('行内代码里的标签提及不算嵌套', !prose6.problems.some((p) => p.code === 'nested-tscl'), JSON.stringify(prose6.problems))
+  fs.writeFileSync(path.join(kbG, 'doc/nest6.md'), '# Nest6\n\n<tscl id="n1"><tscl id="n2">x</tscl></tscl>\n', 'utf8')
+  const nest6 = collectDefs(parse_library(kbG, []))
+  ok('真的嵌套开标签仍被报出来', nest6.problems.some((p) => p.code === 'nested-tscl'), JSON.stringify(nest6.problems.map((p) => p.code)))
+  fs.rmSync(path.join(kbG, 'doc/prose6.md'), { force: true })
+  fs.rmSync(path.join(kbG, 'doc/nest6.md'), { force: true })
+
+  // ⑦ kb_rename 必须先自检、再快照（坏结构不进 git 历史）
+  const toolsSrc6 = fs.readFileSync(path.join(root, 'lib/host/tools.js'), 'utf8')
+  ok('kb_rename 先自检再快照', /if \(errs === 0 && config\.git !== false\) snap = maybeAutosnap/.test(toolsSrc6))
+
+  fs.rmSync(tmpG, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

@@ -74,7 +74,7 @@ dsh plugin add ./project-node-memory-<版本>.tgz
 | `prompt.enabled` | `true`                                          | 是否注册系统提示词段落                                        |
 | `skill.enabled`  | `true`                                          | 是否把随包 Skill 注册进宿主 `skills` 服务                     |
 | `git`            | `true`                                          | 库内嵌 git 快照：每次 `kb_write` 后自动 commit；`false` 关掉 |
-| `advice`         | `{ minFragNodes: 10, fragChars: 300, longSection: 3000, maxItems: 5 }` | `kb_diag` 第三档 `advice` 的阈值与条数上限 |
+| `advice`         | `{ minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | `kb_diag` 第三档 `advice` 的阈值与条数上限 |
 
 `exclude` 默认忽略这些名字：`tmp`、`tmp_*`、`temp*`、`.tmp*`、`*_probe`、`nodekb_lab`、`__pycache__`、`_release_assets`、`venv`。临时目录、探针目录里的 `.nodekb` 通常是实验残渣，列进选择器只会碍事。要放行某个目录写 `"!tmp_keep"`；要额外忽略写 `"scratch"`（与默认名单叠加）。
 
@@ -115,7 +115,7 @@ config:
 
 - `errors`：悬空引用、重复 TID、重复定义、树环 —— 库结构已坏，必修。
 - `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点 —— 按需处理。
-- `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个单节点小文件（建议合并）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 3000 字符。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
+- `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个单节点小文件（建议合并）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 10000 字符。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
 
 插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，已在库内 `.gitignore` 里）。
 
@@ -222,9 +222,13 @@ config:
 
 - `content` 里的 CRLF 先归一成 LF，落盘再按原文件的换行拼回去 —— 不会写出 `\r\r\n`；`append` 的结尾换行由工具补，`CRLF` 文件里不会混进裸 `LF`。
 - `content` 里出现 `</node>` 直接拒（它是包在本节点外面的结构，写进正文会把节点提前截断）；
-  `<node>` / `<tscl>` 开标签要求成对（未闭合会吞掉后面的节点/段）。整篇 `replace` 不校验这条 —— 那种情况作者说了算。
+  `<node>` / `<tscl>` 开标签要求成对（未闭合会吞掉后面的节点/段）。单行的 `<node name="x">正文</node>`
+  与「行首定义 + 同行后缀」的 `<tscl id="v">1</tscl> 说明` 都是合法写法。整篇 `replace` 不校验成对 —— 那种情况作者说了算。
 - 路径必须是小写 `.md`，且不能有点开头的目录/文件（`.draft/x.md`、`.hidden.md` 解析器会跳过，等于写了个看不见的文件）。
-- 回执里的路径统一 `/` 分隔；段写入自动补「标题 / 空行 / 正文 / 空行」。
+- 回执里的路径统一 `/` 分隔；段写入自动补「标题 / 空行 / 正文 / 空行」，且连写多次不会累积空行。
+
+写进去的坏结构（手改 / git 合并 / `replace` 逃生口）由解析器收尾兜底：未闭合的 `<node>` / `<tscl>`
+会让 `kb_diag` 报 **error**（1.5.6 前是 0 error / 0 warning，段节点会悄悄消失）。
 
 TID 支持前缀兜底：`kb_read target=doc:02` 能命中 `doc:02-运行环境`（多个候选中取唯一的
 文件/文件夹节点；纯前缀歧义仍报错并给候选）。

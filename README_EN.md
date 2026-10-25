@@ -69,7 +69,7 @@ All optional, under `config:` on the plugin's row in `cordis.patch.yml`:
 | `prompt.enabled` | `true` | Register the system-prompt section |
 | `skill.enabled` | `true` | Register the bundled skill with the host `skills` service |
 | `git` | `true` | Embedded git snapshots: auto-commit after each `kb_write`; set `false` to disable |
-| `advice` | `{ minFragNodes: 10, fragChars: 300, longSection: 3000, maxItems: 5 }` | Thresholds and cap for the `advice` tier of `kb_diag` |
+| `advice` | `{ minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | Thresholds and cap for the `advice` tier of `kb_diag` |
 
 `exclude` defaults to `tmp`, `tmp_*`, `temp*`, `.tmp*`, `*_probe`, `nodekb_lab`, `__pycache__`, `_release_assets`, `venv`. A `.nodekb` inside a scratch or probe directory is usually leftover from an experiment; listing it only clutters the selector. Use `"!tmp_keep"` to force one back in, and plain names to add more:
 
@@ -110,7 +110,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 
 - `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles: the structure is broken.
 - `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes.
-- `advice` — **written correctly but could be leaner**: ≥10 single-node tiny files under one parent (merge), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 3000 characters. Every item carries a `fix` and **never affects `exit_code`**.
+- `advice` — **written correctly but could be leaner**: ≥10 single-node tiny files under one parent (merge), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters. Every item carries a `fix` and **never affects `exit_code`**.
 
 After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
 
@@ -198,11 +198,17 @@ Four write-time guards against "reported success, library corrupted":
 - `content` is normalised to LF first and re-joined with the file's own newline style — never `\r\r\n`,
   and an `append` to a CRLF file no longer leaves a bare LF behind.
 - `content` containing `</node>` is refused (that tag belongs *outside* the node — writing it truncates
-  the node), and `<node>` / `<tscl>` open tags must be balanced. `mode=replace` (whole-file rewrite) is
-  exempt: there the author is in charge.
+  the node), and `<node>` / `<tscl>` open tags must be balanced. Legal forms stay legal: a single-line
+  `<node name="x">text</node>`, and a line-start `<tscl id="v">1</tscl> trailing prose`. `mode=replace`
+  (whole-file rewrite) is exempt from the balance check: there the author is in charge.
 - Paths must end in lowercase `.md` and no segment may start with a dot (`.draft/x.md` is skipped by the
   parser, so writing there produces an invisible file).
-- Receipts print `/`-separated paths; section writes leave a blank line between heading and body.
+- Receipts print `/`-separated paths; section writes leave a blank line between heading and body, and
+  rewriting the same section repeatedly no longer piles up blank lines.
+
+Unclosed structure that gets in by hand edit, `git merge`, or the `mode=replace` escape hatch is caught by
+the parser itself: `kb_diag` now reports an unclosed `<node>` / `<tscl>` as an **error** (before 1.5.6 it
+was 0 error / 0 warning while section nodes silently disappeared).
 
 A definition may also sit **inline in the middle of a sentence** — the tags are stripped when
 rendered and the value stays where it is written:
