@@ -1892,6 +1892,105 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpG, { recursive: true, force: true })
 }
 
+// ── 16. 反馈6（16:39 版）：碎片判据 / 小节父指针 / 校验口径 / 文案 ─────────
+{
+  section('碎片判据、小节父指针、校验口径（反馈6 二轮）')
+  const tmpH = path.join(root, '.tmp-fb6b')
+  fs.rmSync(tmpH, { recursive: true, force: true })
+  const kbH = path.join(tmpH, '.nodekb')
+  fs.mkdirSync(path.join(kbH, 'doc'), { recursive: true })
+  // 每篇：H1 下只有一句导语，正文全在 ## 里 —— 插件自己推荐的组织方式
+  const page = (i, body) => `# 文件 ${i}\n\n导语一句。\n\n## 1. 正文\n\n${body}\n`
+  const big = '较长的正文。'.repeat(120)
+  for (let i = 1; i <= 12; i++) fs.writeFileSync(path.join(kbH, `doc/f${i}.md`), page(i, big), 'utf8')
+
+  const regH = new Map()
+  const ctxH = {
+    tools: { register: (t) => { regH.set(t.name, t); return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-h' ? { header: { cwd: tmpH } } : null) } : null),
+  }
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  buildTools(ctxH, { git: false })
+  const execH = { agent: { id: 's-h' } }
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const { computeAdvice } = await import(url(path.join(root, 'lib/engine/advice.js')))
+  const advBig = computeAdvice(openLibrary(ctxH, execH, {}).nodes, new Map(), kbH)
+  ok('正文都在 ## 下不算碎片文件（按整篇判）', !advBig.some((a) => a.code === 'merge-fragments'), JSON.stringify(advBig.map((a) => a.code)))
+
+  for (let i = 1; i <= 12; i++) fs.writeFileSync(path.join(kbH, `doc/f${i}.md`), `# 文件 ${i}\n\n短。\n`, 'utf8')
+  const advSmall = computeAdvice(openLibrary(ctxH, execH, {}).nodes, new Map(), kbH)
+  const frag = advSmall.find((a) => a.code === 'merge-fragments')
+  ok('整篇都很小时才报碎片，且说的是「整篇」', !!frag && /整篇不足/.test(frag.message), frag && frag.message)
+
+  // 小节父节点：文件里有显式 <node> 时，## 小节仍挂文件节点
+  fs.writeFileSync(
+    path.join(kbH, 'doc/mix.md'),
+    '<node name="anchor:x">\n锚点正文\n</node>\n\n## 1. 第一节\n\n正文。\n\n## 2. 第二节\n\n正文。\n',
+    'utf8',
+  )
+  const libMix = openLibrary(ctxH, execH, {})
+  const sec1 = libMix.nodes.get('doc:mix:1')
+  ok('小节父节点是文件节点（不再挂第一个显式 node）', !!sec1 && sec1.parent_tid === 'doc:mix', sec1 && sec1.parent_tid)
+  ok('显式 node 仍在自己原来的位置', !!libMix.nodes.get('anchor:x'))
+
+  // 校验口径：行内代码里的标签是示例；报错行号与用户看到的正文一致
+  const { validateContent } = await import(url(path.join(root, 'lib/engine/write.js')))
+  const attempt = (fn) => {
+    try {
+      return fn()
+    } catch (e) {
+      return e
+    }
+  }
+  const okInline = attempt(() =>
+    validateContent('第一行\n正文里提到 `<node name="x">` 和 `<tscl>`、`</node>`。\n', 'doc/x.md'),
+  )
+  ok('行内代码里的标签提及不被校验器拦', !(okInline instanceof Error), okInline instanceof Error ? okInline.message.slice(0, 90) : '')
+  const attemptAsync = async (fn) => {
+    try {
+      return await fn()
+    } catch (e) {
+      return e
+    }
+  }
+  const badLine = attempt(() => validateContent('\n\n第一行\n第二行\n第三行 <node name="x">\n', 'doc/x.md'))
+  ok('校验报错行号对齐用户看到的正文', badLine instanceof Error && /doc\/x\.md:3\b/.test(badLine.message), badLine instanceof Error ? badLine.message.slice(0, 80) : '')
+
+  // long-section 的 fix 要点明「拆节会漂移位置型 TID」
+  const advSrc = fs.readFileSync(path.join(root, 'lib/engine/advice.js'), 'utf8')
+  ok('long-section 的 fix 提示位置型 TID 漂移', /位置型 TID/.test(advSrc))
+
+  // kb_init 误传上级目录时拒绝，而不是把骨架散进项目根
+  fs.mkdirSync(path.join(tmpH, 'sub'), { recursive: true })
+  fs.writeFileSync(path.join(tmpH, 'sub', 'README.md'), '# 已有的项目\n', 'utf8')
+  const initErr = await attemptAsync(() => regH.get('kb_init').execute({ dir: 'sub' }, execH))
+  ok('kb_init 误传上级目录时拒绝', initErr instanceof Error && /库目录本身/.test(initErr.message), initErr instanceof Error ? initErr.message.slice(0, 80) : '')
+  ok('kb_init 拒绝后没有散落骨架', !fs.existsSync(path.join(tmpH, 'sub', 'doc')))
+
+  // 失效的注册表项不占 kb_list 版面，但要报一行总数
+  fs.writeFileSync(
+    path.join(tmpH, 'kb_registry.json'),
+    JSON.stringify({ libraries: { deadone: { path: './nope' } } }),
+    'utf8',
+  )
+  const listRes = await regH.get('kb_list').execute({}, execH)
+  ok('kb_list 隐藏失效登记并报出总数', /已隐藏/.test(listRes.text) && /deadone/.test(listRes.text) && !/路径不存在/.test(listRes.text), listRes.text.split('\n').slice(2, 6).join(' | '))
+
+  // 检索片段要嵌出 tscl 的值，而不是把 [[tscl="…"]] 原样抛给模型
+  fs.writeFileSync(
+    path.join(kbH, 'doc/defuse.md'),
+    '# 阈值\n\n<tscl id="fact:limit">0.85 是阈值</tscl>\n\n阈值统一取 [[tscl="fact:limit"]]。\n',
+    'utf8',
+  )
+  const libDef = openLibrary(ctxH, execH, {})
+  const { search } = await import(url(path.join(root, 'lib/engine/search.js')))
+  const hit = search(libDef.nodes, '阈值', { defs: libDef.defs, libRoot: libDef.nodekb })
+  ok('检索片段嵌出 tscl 的值', hit.hits.some((h) => /0\.85/.test(h.snippet)) && !hit.hits.some((h) => /\[\[tscl=/.test(h.snippet)), JSON.stringify(hit.hits.map((h) => h.snippet.slice(0, 40))))
+
+  fs.rmSync(tmpH, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言

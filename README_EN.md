@@ -110,7 +110,9 @@ The right column renders at most 10,000 characters per view (with a truncation n
 
 - `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles: the structure is broken.
 - `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes.
-- `advice` — **written correctly but could be leaner**: ≥10 single-node tiny files under one parent (merge), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters. Every item carries a `fix` and **never affects `exit_code`**.
+- `advice` — **written correctly but could be leaner**: ≥10 files under one parent whose **whole text** (preamble + all `##` sections + `<node>` bodies) is under 500 chars (merge), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters (its `fix` warns that splitting a section shifts positional TIDs). Every item carries a `fix` and **never affects `exit_code`**.
+
+A `##` section's parent is **always the file node**: "one file per topic, split by `##`" and named `<node>` anchors can coexist in one file, and the TOC lists them as siblings instead of chaining `3.1 → lesson1 → 3.2`.
 
 After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
 
@@ -209,6 +211,10 @@ Four write-time guards against "reported success, library corrupted":
 Unclosed structure that gets in by hand edit, `git merge`, or the `mode=replace` escape hatch is caught by
 the parser itself: `kb_diag` now reports an unclosed `<node>` / `<tscl>` as an **error** (before 1.5.6 it
 was 0 error / 0 warning while section nodes silently disappeared).
+
+Write-time validation uses the parser's own rules (1.5.7): `<node>` / `<tscl>` mentioned inside inline code
+is an example, not structure, so prose that teaches the syntax may spell it out; and error line numbers refer
+to the `content` you passed (leading/trailing blank lines excluded) instead of drifting one line off.
 
 A definition may also sit **inline in the middle of a sentence** — the tags are stripped when
 rendered and the value stays where it is written:
