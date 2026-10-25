@@ -1421,7 +1421,13 @@ section('tscl 定义与双语法')
   fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.0' }), 'utf8')
   updateNotice(kbA) // 触发 markSeen
   ok('markSeen 后工作树仍干净', advStatus(kbA).dirty === false, JSON.stringify(advStatus(kbA)))
-  ok('状态文件进了 .git/info/exclude', fs.readFileSync(path.join(kbA, '.git/info/exclude'), 'utf8').includes('.plugin-state.json'))
+  // 有 git 时才有 .git/info/exclude 这个文件；没有 git 时这组断言本身没有意义（不是失败）
+  {
+    const hasGit = gitOut(['-C', kbA, 'rev-parse', '--git-dir']) !== null
+    const exPath = path.join(kbA, '.git/info/exclude')
+    const exText = hasGit && fs.existsSync(exPath) ? fs.readFileSync(exPath, 'utf8') : ''
+    ok('状态文件进了 .git/info/exclude', !hasGit || exText.includes('.plugin-state.json'), hasGit ? `exclude=${JSON.stringify(exText.slice(0, 80))}` : '无 git，跳过')
+  }
 
   // 一次性提醒不能把 advice 顶成 maxItems + 1 条
   const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
@@ -1668,6 +1674,115 @@ section('tscl 定义与双语法')
   ok('拒绝后文件没被改', !fs.readFileSync(path.join(kbF, 'doc/sec.md'), 'utf8').includes('子内容'))
 
   fs.rmSync(tmpF, { recursive: true, force: true })
+}
+
+// ── 14. 写坏库却报成功：CRLF 内容 / 标签不配对 / 改名撞 TID / 隐形路径（反馈5 回归） ────
+{
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { writeInto } = await import(url(path.join(root, 'lib/engine/write.js')))
+  const { renameFileNode } = await import(url(path.join(root, 'lib/engine/rename.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+
+  const tmpE = path.join(root, '.tmp-f5')
+  fs.rmSync(tmpE, { recursive: true, force: true })
+  const kbE = path.join(tmpE, '.nodekb')
+  fs.mkdirSync(path.join(kbE, 'doc'), { recursive: true })
+  const crlfAbs = path.join(kbE, 'doc/crlf.md')
+  fs.writeFileSync(
+    crlfAbs,
+    '# CRLF\r\n\r\n<node name="abi">\r\n旧正文。\r\n</node>\r\n\r\n## 1. 甲\r\n\r\n旧甲。\r\n',
+    'utf8',
+  )
+  fs.writeFileSync(path.join(kbE, 'doc/03-a.md'), '# 三号\r\n\r\n已有内容。\r\n', 'utf8')
+  fs.writeFileSync(path.join(kbE, 'doc/zz.md'), '# ZZ\r\n\r\n待改名。\r\n', 'utf8')
+  const libE = { nodekb: kbE, nodes: parse_library(kbE, []) }
+  ok('CRLF 夹具解析出 abi 与段节点', libE.nodes.has('abi') && libE.nodes.has('doc:crlf:1'), [...libE.nodes.keys()].join(','))
+
+  // ① content 自带 CRLF：以前 split('\n') 留下 \r，再 join('\r\n') 写成 \r\r\n（字节坏了但回执说成功）
+  writeInto(libE, { target: 'abi', content: '第一行\r\n第二行\r\n' })
+  const crlfRaw = fs.readFileSync(crlfAbs, 'utf8')
+  ok('node 写入不产生 \\r\\r\\n', !crlfRaw.includes('\r\r\n'), JSON.stringify(crlfRaw.slice(0, 80)))
+  ok('node 写入跟随原文件的 CRLF 风格', crlfRaw.includes('<node name="abi">\r\n第一行\r\n第二行\r\n</node>'), JSON.stringify(crlfRaw.slice(0, 90)))
+
+  libE.nodes = parse_library(kbE, [])
+  writeInto(libE, { target: 'doc:crlf:1', content: '新一\r\n新二\r\n' })
+  const secRaw = fs.readFileSync(crlfAbs, 'utf8')
+  ok('段写入不产生 \\r\\r\\n', !secRaw.includes('\r\r\n'), JSON.stringify(secRaw.slice(-60)))
+  ok('段写入后标题与正文之间有空格行', secRaw.includes('## 1. 甲\r\n\r\n新一\r\n新二\r\n'), JSON.stringify(secRaw.slice(-50)))
+
+  // append：内容自带的结尾 \n 不该在 CRLF 文件里留下裸 LF
+  writeInto(libE, { target: 'doc/crlf.md', content: '追加一行\n', mode: 'append' })
+  const appRaw = fs.readFileSync(crlfAbs, 'utf8')
+  ok('append 不混入裸 LF', (appRaw.match(/\n/g) || []).length === (appRaw.match(/\r\n/g) || []).length, JSON.stringify(appRaw.slice(-40)))
+
+  // ② `</node>` / 未闭合的 `<node>` 会截断节点（以前回执成功、diag 只有一条 warning）
+  const closeErr = (() => {
+    try {
+      writeInto(libE, { target: 'abi', content: '第一段。\n</node>\n漏出来的。' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('content 里的 </node> 被拒', closeErr !== null && /截断|<\/node>/.test(closeErr.message), closeErr && closeErr.message.split('\n')[0].slice(0, 80))
+  ok('拒绝后节点正文没变', fs.readFileSync(crlfAbs, 'utf8').includes('第一行'))
+
+  const openErr = (() => {
+    try {
+      writeInto(libE, { target: 'abi', content: '<node name="x">\n新正文。' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('content 里未闭合的 <node> 被拒', openErr !== null && /未闭合|吞掉/.test(openErr.message), openErr && openErr.message.split('\n')[0].slice(0, 80))
+
+  // ③ 改名撞 TID：Windows 上「03 a」与「03-a」slug 后同名，以前改完另一个文件从库里消失
+  libE.nodes = parse_library(kbE, [])
+  const clashErr = (() => {
+    try {
+      renameFileNode(libE, 'doc:zz', '03 a')
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('改名撞 TID 被拒', clashErr !== null && /撞名|已被/.test(clashErr.message), clashErr && clashErr.message.slice(0, 90))
+  ok('拒绝后两个文件都还在', fs.existsSync(path.join(kbE, 'doc/03-a.md')) && fs.existsSync(path.join(kbE, 'doc/zz.md')))
+
+  const toolsSrc = fs.readFileSync(path.join(root, 'lib/host/tools.js'), 'utf8')
+  ok('kb_rename 收尾也跑一次自检（不再只回「已重命名」）', /if \(!report\.dry_run && report\.renamed\)[\s\S]{0,600}?diag\(fresh\.nodes/.test(toolsSrc))
+
+  // ④ 解析器永远跳过的路径（点开头目录、大写扩展名）：写进去等于写了个看不见的文件
+  const dotErr = (() => {
+    try {
+      writeInto(libE, { target: '.draft/x.md', content: '草稿。\n' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('点开头的目录被拒', dotErr !== null && /点开头/.test(dotErr.message), dotErr && dotErr.message.slice(0, 70))
+  ok('拒绝后没建出 .draft/', !fs.existsSync(path.join(kbE, '.draft')))
+
+  const upperErr = (() => {
+    try {
+      writeInto(libE, { target: 'notes/x.MD', content: '大写扩展名。\n' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('大写扩展名被拒（解析器只认小写 .md）', upperErr !== null && /小写/.test(upperErr.message), upperErr && upperErr.message.slice(0, 80))
+
+  // ⑤ 回执路径统一用 / 分隔（以前路径模式给 doc\01-a.md、TID 模式给 doc/01-a.md）
+  const relOk = writeInto(libE, { target: 'notes/x.md', content: '笔记。\n' })
+  ok('回执路径用 / 分隔', relOk.rel === 'notes/x.md', relOk.rel)
+
+  const dgE = diag(parse_library(kbE, []), { libRoot: kbE, defs: new Map() })
+  ok('这一轮折腾后库里没有 error', dgE.report.errors.length === 0, JSON.stringify(dgE.report.errors).slice(0, 200))
+
+  fs.rmSync(tmpE, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

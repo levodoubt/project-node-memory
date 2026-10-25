@@ -190,7 +190,19 @@ renamed. Explicit node TIDs **need no colon** (`<node name="abi">` → TID `abi`
 accept single or double quotes alike. `kb_write`'s `target` resolves as: an existing TID → a root
 file name → a path (`.md` appended); anything else is refused instead of creating a stray file at the
 library root. `kb_rename`'s `new_name` must be a bare file name in the same directory (no separators,
-no `..`).
+no `..`), and a rename that would collide with an existing TID is refused (otherwise two files map to
+one TID and one of them silently disappears from the library).
+
+Four write-time guards against "reported success, library corrupted":
+
+- `content` is normalised to LF first and re-joined with the file's own newline style — never `\r\r\n`,
+  and an `append` to a CRLF file no longer leaves a bare LF behind.
+- `content` containing `</node>` is refused (that tag belongs *outside* the node — writing it truncates
+  the node), and `<node>` / `<tscl>` open tags must be balanced. `mode=replace` (whole-file rewrite) is
+  exempt: there the author is in charge.
+- Paths must end in lowercase `.md` and no segment may start with a dot (`.draft/x.md` is skipped by the
+  parser, so writing there produces an invisible file).
+- Receipts print `/`-separated paths; section writes leave a blank line between heading and body.
 
 A definition may also sit **inline in the middle of a sentence** — the tags are stripped when
 rendered and the value stays where it is written:
