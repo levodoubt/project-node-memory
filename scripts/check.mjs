@@ -1991,6 +1991,72 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpH, { recursive: true, force: true })
 }
 
+// ── 17. 反馈8：别名合并 / 默认父结构决定 / ### 不算段 / 阈值可见 / kb_init parts ──
+{
+  section('别名合并、默认父、### 口径、advice 阈值、kb_init parts（反馈8）')
+  const tmpI = path.join(root, '.tmp-fb8')
+  fs.rmSync(tmpI, { recursive: true, force: true })
+  const kbI = path.join(tmpI, '.nodekb')
+  fs.mkdirSync(path.join(kbI, 'doc'), { recursive: true })
+  const regI = new Map()
+  const ctxI = {
+    tools: { register: (t) => { regI.set(t.name, t); return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-i' ? { header: { cwd: tmpI } } : null) } : null),
+  }
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  buildTools(ctxI, { git: false })
+  const execI = { agent: { id: 's-i' } }
+
+  // ① 同一个库两套名字：发现名 + 注册表别名，kb_list 要并到同一行
+  //    （注册表里的 path 是「含 .nodekb 的那一层」，与发现项同指一个库）
+  fs.writeFileSync(
+    path.join(tmpI, 'kb_registry.json'),
+    JSON.stringify({ libraries: { 'short-name': { path: tmpI }, gone: { path: path.join(tmpI, 'nope') } } }),
+    'utf8',
+  )
+  const { listLibraries } = await import(url(path.join(root, 'lib/engine/registry.js')))
+  const rows = listLibraries({ workspace: tmpI, config: {}, scope: 'workspace', includeHidden: false })
+  const found = rows.find((r) => path.resolve(r.path) === path.resolve(tmpI))
+  ok('注册名并到同一个库的 aliases 里', !!found && Array.isArray(found.aliases) && found.aliases.includes('short-name'), found && JSON.stringify(found.aliases))
+  ok('别名不额外占一行', rows.filter((r) => r.name === 'short-name').length === 0, JSON.stringify(rows.map((r) => r.name)))
+  const listI = await regI.get('kb_list').execute({}, execI)
+  ok('kb_list 行内显示别名', /别名：short-name/.test(listI.text), listI.text.split('\n').slice(2, 5).join(' | '))
+
+  // ② 默认父 = 结构决定：同文件多个显式 <node> 是并列兄弟，嵌套的才挂外层
+  fs.writeFileSync(
+    path.join(kbI, 'doc/tree.md'),
+    '<node name="p1">\n第一\n</node>\n\n<node name="p2">\n第二\n</node>\n\n<node name="outer">\n外层\n<node name="inner">\n内层\n</node>\n</node>\n',
+    'utf8',
+  )
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const libI = openLibrary(ctxI, execI, {})
+  ok('同文件两个显式节点的默认父都是文件节点', libI.nodes.get('p1').parent_tid === 'doc:tree' && libI.nodes.get('p2').parent_tid === 'doc:tree', [libI.nodes.get('p1').parent_tid, libI.nodes.get('p2').parent_tid].join(','))
+  ok('写在外层 <node> 里的节点挂外层', libI.nodes.get('inner').parent_tid === 'outer', libI.nodes.get('inner').parent_tid)
+
+  // ③ ### 不建节点、也不切段
+  fs.writeFileSync(path.join(kbI, 'doc/probe.md'), '# 探针\n\n## 1. 概览\n\n### 1.1 细节\n\n正文。\n', 'utf8')
+  const libProbe = openLibrary(ctxI, execI, {})
+  ok('### 不产生节点', !libProbe.nodes.has('doc:probe:1.1') && libProbe.nodes.has('doc:probe:1'))
+
+  // ④ 段节点过长：文案带可配阈值，且列出最大的几个
+  const { computeAdvice } = await import(url(path.join(root, 'lib/engine/advice.js')))
+  fs.writeFileSync(path.join(kbI, 'doc/long.md'), '# 长段\n\n## 1. 一大段\n\n' + '长正文。'.repeat(2600) + '\n', 'utf8')
+  const adv = computeAdvice(openLibrary(ctxI, execI, {}).nodes, new Map(), kbI)
+  const long = adv.find((a) => a.code === 'long-section')
+  ok('long-section 文案说明阈值可配', !!long && /advice\.longSection/.test(long.message), long && long.message)
+  ok('long-section 列出超限的段', !!long && /doc:long:1/.test(long.message), long && long.message)
+
+  // ⑤ kb_init 只铺要的目录组，且 entry 不引用没铺的 doc
+  const { scaffold } = await import(url(path.join(root, 'lib/engine/scaffold.js')))
+  const bare = scaffold(path.join(tmpI, 'bare', '.nodekb'), { parts: ['index'] })
+  ok('parts 只铺指定的组', bare.created.includes('index/entry.md') && bare.created.includes('README.md') && !bare.created.some((f) => f.startsWith('doc/') || f.startsWith('lessons/') || f.startsWith('todo/')), bare.created.join(','))
+  const entryBare = fs.readFileSync(path.join(tmpI, 'bare', '.nodekb/index/entry.md'), 'utf8')
+  ok('没铺 doc 时 entry 不引用 doc:00-overview', !/doc:00-overview/.test(entryBare), entryBare.split('\n').slice(0, 3).join(' | '))
+
+  fs.rmSync(tmpI, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言
