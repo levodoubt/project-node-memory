@@ -609,6 +609,24 @@ try {
     ok('带引号的 [[tscl="…"]] 也重写', q.text.includes('[[tscl="doc:guide"]]'), q.text)
     ok('带引号且前缀相同的不动', q.text.includes('[[node="doc:indexx"]]'))
 
+    // parent= 也是 TID 引用：漏改 = 改名就把库改坏（子节点变孤儿，diag exit 2）
+    const parenting = '<node name="nested" parent="doc:index">\n正文\n</node>'
+    const pq = rewriteRefsInText(parenting, 'doc:index', 'doc:guide')
+    ok('parent= 属性跟着改名', pq.text.includes('parent="doc:guide"') && !pq.text.includes('parent="doc:index"'), pq.text)
+
+    // 端到端：带 parent= 的嵌套节点，改名后 diag 不该报孤儿
+    fs.cpSync(path.join(root, FIX), path.join(tmp, 'par'), { recursive: true })
+    const parKb = path.join(tmp, 'par/.nodekb')
+    fs.appendFileSync(path.join(parKb, 'doc/index.md'), '\n<node name="nested" parent="doc:index">\n正文\n</node>\n', 'utf8')
+    const parNodes = parse_library(parKb, [])
+    ok('嵌套节点改名前父指向 doc:index', parNodes.get('nested') && parNodes.get('nested').parent_tid === 'doc:index', String(parNodes.get('nested') && parNodes.get('nested').parent_tid))
+    const { diag: diagFn } = await import(url(path.join(root, 'lib/engine/diag.js')))
+    renameFileNode({ nodekb: parKb, nodes: parNodes }, 'doc:index', 'guide5')
+    const parAfter = parse_library(parKb, [])
+    ok('改名后嵌套节点的 parent 跟着搬', parAfter.get('nested') && parAfter.get('nested').parent_tid === 'doc:guide5', String(parAfter.get('nested') && parAfter.get('nested').parent_tid))
+    const parDiag = diagFn(parAfter, { libRoot: parKb })
+    ok('改名后 diag 不报孤儿节点', !parDiag.report.errors.some((e) => /孤儿节点/.test(e)), JSON.stringify(parDiag.report.errors.slice(0, 3)))
+
     fs.cpSync(path.join(root, FIX), path.join(tmp, 'rel'), { recursive: true })
     const relNodes = parse_library(path.join(tmp, 'rel/.nodekb'), [])
     const rel = renameFileNode({ nodekb: path.join(tmp, 'rel/.nodekb'), nodes: relNodes }, 'doc/index.md', 'guide4')
@@ -1233,6 +1251,7 @@ section('tscl 定义与双语法')
   ok('mode=node 能改 ## 段正文', /新正文二/.test(secText) && !/旧正文/.test(secText), secText.replace(/\n/g, '\\n'))
   ok('段的标题与相邻段没被碰', secText.includes('## 1 版本') && secText.includes('## 2 其它') && /无关内容/.test(secText), secText.replace(/\n/g, '\\n'))
   ok('段写入回执正常', /已写入/.test(String(sw.text)), String(sw.text).slice(0, 80))
+  ok('段写入回执用相对路径', sw.path === 'lessons/sec.md', String(sw.path))
 
   // 段里有 <node>：拒绝整段替换，而不是静默删掉
   fs.writeFileSync(path.join(kb4, 'lessons/sec2.md'), '# Sec2\n\n## 1 含节点\n\n<node name="tmp:in" type="tmp">\n内\n</node>\n', 'utf8')
@@ -1245,6 +1264,7 @@ section('tscl 定义与双语法')
     guardErr = e
   }
   ok('段内有 <node> 时拒绝整段替换', guardErr !== null && /拒绝/.test(guardErr.message), guardErr && guardErr.message.slice(0, 90))
+  ok('拒绝文案里的逃生口是相对路径', guardErr !== null && /lessons\/sec2\.md/.test(guardErr.message) && !/[A-Za-z]:[\\/]/.test(guardErr.message), guardErr && guardErr.message.split('\n').slice(-1)[0])
   ok('拒绝后原文还在', /内/.test(fs.readFileSync(path.join(kb4, 'lessons/sec2.md'), 'utf8')) && lib7.nodes.has('tmp:in'))
 
   // 自动快照：git 初始化后写入 → autosnap 提交
