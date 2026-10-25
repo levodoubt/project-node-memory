@@ -74,11 +74,21 @@ function readCase(name, target, opts = {}, pyArgs) {
 }
 
 // toc 不套 --json 外壳，直接比文本（去掉 CLI print 的尾部换行）
-check(
-  'read doc:index toc',
-  py(['read', 'doc:index', '--toc']).replace(/\s+$/, ''),
-  cmdRead(nodes, 'doc:index', { toc: true }).text,
-)
+// 1.5.8 起缺省 parent 由**结构**决定：平铺写的 `<node>` 是并列兄弟（都挂在文件节点下）；
+// Python 旧版按 `first_node_tid` 把第二个及以后的 `<node>` 链到「本文件第一个 `<node>`」下。
+// 这是有意分叉——比较时抹平 `note:inline` 的缩进差异，分叉本身单独断言。
+{
+  const pyToc = py(['read', 'doc:index', '--toc']).replace(/\s+$/, '')
+  const jsToc = cmdRead(nodes, 'doc:index', { toc: true }).text
+  const flatten = (s) => s.replace(/\n +- note:inline/g, '\n  - note:inline')
+  check('read doc:index toc', flatten(pyToc), flatten(jsToc))
+  check('缺省 parent 分叉：Python 把 inline 链在 explicit 下', true, /\n {4}- note:inline/.test(pyToc))
+  check(
+    '缺省 parent 分叉：JS 让 inline 与 explicit 并列',
+    true,
+    /\n {2}- note:explicit[\s\S]*\n {2}- note:inline/.test(jsToc),
+  )
+}
 
 // node 模式：Python 侧含「本节点含 N 个子节」提示且会展开引用 → 只比前言的纯文本前缀
 {
