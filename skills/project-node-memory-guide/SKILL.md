@@ -1,5 +1,6 @@
 ---
 name: project-node-memory-guide
+version: 1.5.0
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -21,6 +22,16 @@ kb_search query=...         # toc 里找不到再搜
 
 **不要**一次把整库读进上下文。写之前先确认：这个结论是不是已经写在别处了？是的话改那一处，不要把同一结论写两遍。
 
+写完跑一次 `kb_diag`，它分三档：
+
+| 档 | 含义 | 怎么处理 |
+| --- | --- | --- |
+| `errors` | 真损坏：悬空引用、重复 TID、重复定义、树环 | 必修，否则库结构已坏 |
+| `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点 | 按需处理 |
+| `advice` | **写得对，但还能更省**：碎片文件过多、同一句散在多处、缺入口、缺 H1、段节点过长 | 建议处理，不影响 exit_code |
+
+`advice` 每条都带 `fix`，照着改就行。**它不会让 `kb_diag` 失败**——CI 里可以无视。
+
 ## 目录规划
 
 | 目录             | 放什么                           | 判据                           |
@@ -33,6 +44,8 @@ kb_search query=...         # toc 里找不到再搜
 这张表是**推荐做法**，你可以自行根据项目实际情况进行规划。如项目没有待办就别建 `todo/`，需要 `adr/`、`api/` 等就自己加；节点 `type` 同样自由。
 
 一个主题一个文件，**单文件取 < 4KB**；变大就按子主题拆成 `## 3.x` 段或独立文件。
+
+反过来也别碎：同一个目录下**别堆十几个几百字的小文件**——读一次要开十几次 `kb_read`。`kb_diag` 的 `advice` 会在「同父节点下 ≥10 个单节点小文件」时提醒你合并。
 
 ## 两种引用方法
 
@@ -73,15 +86,18 @@ tscl 机制支持段落标记与行内标记
 ```
 kb_write target=lessons/003-cp936.md  mode=create  content=...
 kb_write target=<显式节点TID>          mode=node    content=...   # 只换 <node> 之间的正文
+kb_write target=<段节点TID>            mode=node    content=...   # 也可以换 ## 段落的正文
 kb_write target=doc/03-...md          mode=append  content=...
 ```
 
 - 写完**看返回值里的校验结果**：悬空引用、重复定义、`<node>` 没独占一行，都会当场报回来。
 - 改已有内容用 `append` / `node`，不要 `replace` 整篇（会丢掉别人刚写的段落）。
 - 新建文件前先 `kb_read mode=toc` 确认没有同主题的旧文件。
+- 库是内嵌 git 仓库，**写入/改名成功后会自动快照**（commit message 形如 `kb_write: doc/03-x.md`）。回执里有一行 `Snapshot:`；不想要快照就配 `git: false`。
 
 ## 注意事项
 
 0. 库定位找不到时先 `kb_list`：它会写明本会话判定的工作区、来源（会话头 / 配置 / 面板）与每个库的绝对路径。已有的库用 `kb_register dir=<库目录> name=<名字>` 登记进项目的 `kb_registry.json`，不要让人去改插件配置。
+0.1 插件升级后第一次跑 `kb_diag`，报告里会多出一条 `plugin-updated`：那是在提醒你「规则变了，先重读本技能」。每条库只提醒一次（记在 `.nodekb/.plugin-state.json`，已在 `.gitignore` 里）。
 1. 不要把整段对话贴进 `doc/` —— 记的是过程，不是结论。
 2. 不要把同一件事在 `doc/` 和 `lessons/` 各写一份 —— 抽成 `<tscl>` 定义，两处都引用它。

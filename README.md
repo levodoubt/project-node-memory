@@ -101,13 +101,21 @@ config:
 | `kb_list`       | 有哪些库（含绝对路径与来源）、本会话判定的工作区。不确定传什么 `kb` 时先调它                   |
 | `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`                         |
 | `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段             |
-| `kb_diag`       | 结构自检；有 error 时直接失败，别读完才发现引用断了                                            |
+| `kb_diag`       | 结构自检：`errors` / `warnings` / `advice` 三档；`advice` 是「还能更省」的改进建议，不影响退出码 |
 | `kb_backlinks`  | 谁引用了它。改 TID / 删节点前先跑                                                              |
 | `kb_init`       | 建 `.nodekb` 骨架（幂等），铺出 `doc/ lessons/ todo/ index/` 与落位约定                 |
 | `kb_register`   | 把已有的库登记进**项目自己**的 `kb_registry.json`（不写全局表、不改配置）                      |
-| `kb_write`      | 写库：`append` / `replace` / `create` / `node`（就地改写一个 `<node>` 块）；写前校验、写后自检 |
+| `kb_write`      | 写库：`append` / `replace` / `create` / `node`（就地改写一个 `<node>` 块或 `##` 段）；写前校验、写后自检、**成功后自动快照** |
 | `kb_rename`     | 文件改名 + 全库引用一起改写；写前重读，别人刚改的不覆盖                                        |
-| `kb_vcs_status` | 库内嵌 git 的快照历史与未提交改动（git 缺失时只说明，不报错）                                  |
+| `kb_vcs_status` | 库内嵌 git 的快照历史与未提交改动（`kb_write` / `kb_rename` 成功后自动快照；git 缺失时只说明，不报错） |
+
+### 自检的三档
+
+- `errors`：悬空引用、重复 TID、重复定义、树环 —— 库结构已坏，必修。
+- `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点 —— 按需处理。
+- `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个单节点小文件（建议合并）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 3000 字符。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
+
+插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，已在库内 `.gitignore` 里）。
 
 ## 库怎么定位
 

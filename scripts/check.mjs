@@ -1253,6 +1253,46 @@ section('tscl 定义与双语法')
   fs.rmSync(tmp4, { recursive: true, force: true })
 }
 
+// ── 11. advice 三档与更新提醒 ──────────────────────────────────────────────
+{
+  const { computeAdvice } = await import(url(path.join(root, 'lib/engine/advice.js')))
+  const { markSeen, updateNotice } = await import(url(path.join(root, 'lib/host/tools.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const { openLibrary, bindServices } = await import(url(path.join(root, 'lib/host/runtime.js')))
+
+  const tmpA = path.join(root, '.tmp-advice')
+  fs.rmSync(tmpA, { recursive: true, force: true })
+  const kbA = path.join(tmpA, '.nodekb')
+  fs.mkdirSync(path.join(kbA, 'doc'), { recursive: true })
+  // 10 个碎片文件 + 同一句重复
+  for (let i = 1; i <= 11; i++) {
+    fs.writeFileSync(path.join(kbA, `doc/frag-${i}.md`), `# 碎片 ${i}\n\n这条阈值统一取 0.85，不要改。\n`, 'utf8')
+  }
+  const ctxA = { tools: { register: () => () => {} }, webServer: { register: () => () => {} }, get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-a' ? { header: { cwd: tmpA } } : null) } : null) }
+  bindServices(ctxA)
+  const libA = openLibrary(ctxA, { agent: { id: 's-a' } }, {})
+  const adv = computeAdvice(libA.nodes, libA.defs, libA.nodekb)
+  ok('advice：碎片文件被建议合并', adv.some((a) => a.code === 'merge-fragments'))
+  ok('advice：重复字面值被建议提取 tscl', adv.some((a) => a.code === 'extract-tscl'))
+  ok('advice：缺入口被建议补', adv.some((a) => a.code === 'missing-entry'))
+  ok('advice 每条都带 fix', adv.every((a) => typeof a.fix === 'string' && a.fix.length > 10))
+  const dr = diag(libA.nodes, { libRoot: libA.nodekb, defs: libA.defs, advice: adv })
+  ok('diag 报出 advice 数组', Array.isArray(dr.report.advice) && dr.report.advice.length === adv.length)
+  ok('advice 不影响退出码', dr.code === 0, `code=${dr.code}`)
+
+  // 更新提醒：状态文件不存在 → 不提醒；写了旧版本 → 提醒一次
+  const n0 = updateNotice(kbA)
+  ok('首次（无状态）不提醒', n0 === null, JSON.stringify(n0))
+  markSeen(kbA)
+  ok('markSeen 写出状态文件', fs.existsSync(path.join(kbA, '.plugin-state.json')))
+  ok('markSeen 把状态文件加进 .gitignore', fs.readFileSync(path.join(kbA, '.gitignore'), 'utf8').includes('.plugin-state.json'))
+  fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.1' }), 'utf8')
+  const n1 = updateNotice(kbA)
+  ok('版本变化时提醒一次', n1 && n1.code === 'plugin-updated' && /0\.0\.1/.test(n1.message), JSON.stringify(n1))
+  ok('提醒后即视为已看', updateNotice(kbA) === null)
+  fs.rmSync(tmpA, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言

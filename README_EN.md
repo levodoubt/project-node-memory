@@ -96,13 +96,21 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_list` | Which libraries exist (absolute paths and origins) plus the workspace this call resolved to. Call this first when unsure what `kb` to pass |
 | `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen` |
 | `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet |
-| `kb_diag` | Structure self-check; fails outright on errors so you don't finish a read before noticing a broken ref |
+| `kb_diag` | Structure self-check in three tiers: `errors` / `warnings` / `advice`; `advice` is "could be leaner" guidance and never affects the exit code |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
 | `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions |
 | `kb_register` | Register an existing library in the **project's own** `kb_registry.json` (never the global registry or the plugin config) |
-| `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block in place); validates before writing, self-checks after |
+| `kb_write` | Write into the library: `append` / `replace` / `create` / `node` (rewrite one `<node>` block or `##` section in place); validates, self-checks, **auto-snapshots** on success |
 | `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
-| `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (explains itself when git is missing) |
+| `kb_vcs_status` | Snapshot history and uncommitted changes of the library's embedded git repo (`kb_write` / `kb_rename` snapshot automatically; explains itself when git is missing) |
+
+### The three tiers of `kb_diag`
+
+- `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles: the structure is broken.
+- `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes.
+- `advice` — **written correctly but could be leaner**: ≥10 single-node tiny files under one parent (merge), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 3000 characters. Every item carries a `fix` and **never affects `exit_code`**.
+
+After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
 
 ## How a library is located
 
