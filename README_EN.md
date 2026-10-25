@@ -68,6 +68,8 @@ All optional, under `config:` on the plugin's row in `cordis.patch.yml`:
 | `exclude` | see below | Directory names skipped during discovery (`*` wildcard; `!pattern` forces inclusion) |
 | `prompt.enabled` | `true` | Register the system-prompt section |
 | `skill.enabled` | `true` | Register the bundled skill with the host `skills` service |
+| `git` | `true` | Embedded git snapshots: auto-commit after each `kb_write`; set `false` to disable |
+| `advice` | `{ minFragNodes: 10, fragChars: 300, longSection: 3000, maxItems: 5 }` | Thresholds and cap for the `advice` tier of `kb_diag` |
 
 `exclude` defaults to `tmp`, `tmp_*`, `temp*`, `.tmp*`, `*_probe`, `nodekb_lab`, `__pycache__`, `_release_assets`, `venv`. A `.nodekb` inside a scratch or probe directory is usually leftover from an experiment; listing it only clutters the selector. Use `"!tmp_keep"` to force one back in, and plain names to add more:
 
@@ -201,7 +203,7 @@ The old `[[TID]]` form still works (macro when a definition exists, link otherwi
 ## Self-check (no DSH required)
 
 ```bash
-node scripts/check.mjs      # 377 checks: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill
+node scripts/check.mjs      # full self-check: manifest contract / tools / routes / client slots / rename rewriting / scaffold + write / tscl / prompt section / bundled skill (prints "N passed")
 node test/parity.mjs        # case-by-case parity against the Python implementation (needs python and nodekb sources)
 ```
 

@@ -73,6 +73,8 @@ dsh plugin add ./project-node-memory-<版本>.tgz
 | `exclude`        | 见下                                            | 库发现时忽略的目录名，支持 `*` 通配；`!pattern` 强制放行     |
 | `prompt.enabled` | `true`                                          | 是否注册系统提示词段落                                        |
 | `skill.enabled`  | `true`                                          | 是否把随包 Skill 注册进宿主 `skills` 服务                     |
+| `git`            | `true`                                          | 库内嵌 git 快照：每次 `kb_write` 后自动 commit；`false` 关掉 |
+| `advice`         | `{ minFragNodes: 10, fragChars: 300, longSection: 3000, maxItems: 5 }` | `kb_diag` 第三档 `advice` 的阈值与条数上限 |
 
 `exclude` 默认忽略这些名字：`tmp`、`tmp_*`、`temp*`、`.tmp*`、`*_probe`、`nodekb_lab`、`__pycache__`、`_release_assets`、`venv`。临时目录、探针目录里的 `.nodekb` 通常是实验残渣，列进选择器只会碍事。要放行某个目录写 `"!tmp_keep"`；要额外忽略写 `"scratch"`（与默认名单叠加）。
 
@@ -231,7 +233,7 @@ ABI 校验见 [[tscl="fact:ver"]]。
 ## 自检（不装 DSH 也能跑）
 
 ```bash
-node scripts/check.mjs      # 377 项：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能
+node scripts/check.mjs      # 自检全量：清单契约 / 工具 / 路由 / 客户端槽位 / 改名改写 / 建库写库 / tscl / 提示词段落 / 随包技能（结尾打印 N passed）
 node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python 与 nodekb 源码）
 ```
 

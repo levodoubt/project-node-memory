@@ -1253,6 +1253,70 @@ section('tscl 定义与双语法')
   ok('段写入回执正常', /已写入/.test(String(sw.text)), String(sw.text).slice(0, 80))
   ok('段写入回执用相对路径', sw.path === 'lessons/sec.md', String(sw.path))
 
+  // 1.5.3：围栏感知 —— 代码块里的 `# 注释` 不能当成段边界（否则会把围栏切坏）
+  fs.writeFileSync(
+    path.join(kb4, 'lessons/fence.md'),
+    '# F\n\n## 1 带围栏\n\n正文 A\n\n```bash\n# 注释行\necho hi\n```\n\n尾注\n\n## 2 其它\n\n无关\n',
+    'utf8',
+  )
+  const libF = openLibrary(ctx4, ex, {})
+  const secF = [...libF.nodes.values()].find((n) => secFile(n, 'fence.md'))
+  await tools4.kb_write.execute({ target: secF.tid, mode: 'node', content: '换过的正文' }, ex)
+  const fenceText = fs.readFileSync(path.join(kb4, 'lessons/fence.md'), 'utf8')
+  ok(
+    '围栏里的 # 不被当成段边界',
+    fenceText.includes('## 2 其它') && fenceText.includes('无关') && !fenceText.includes('echo hi') && !fenceText.includes('注释行'),
+    fenceText.replace(/\n/g, '\\n'),
+  )
+  ok('没被切出孤立围栏', (fenceText.match(/```/g) || []).length % 2 === 0, fenceText.replace(/\n/g, '\\n'))
+
+  // 段里围栏内的 <node> 是示例，不该触发「拒绝整段替换」
+  fs.writeFileSync(
+    path.join(kb4, 'lessons/fence2.md'),
+    '# F2\n\n## 1 用法\n\n示例：\n\n```md\n<node name="demo" type="demo">\n示例正文\n</node>\n```\n\n真内容\n\n## 2 其它\n\n无关\n',
+    'utf8',
+  )
+  const libF2 = openLibrary(ctx4, ex, {})
+  const secF2 = [...libF2.nodes.values()].find((n) => secFile(n, 'fence2.md'))
+  let fenceErr = null
+  let fenceW = null
+  try {
+    fenceW = await tools4.kb_write.execute({ target: secF2.tid, mode: 'node', content: '改过的正文' }, ex)
+  } catch (e) {
+    fenceErr = e
+  }
+  ok(
+    '围栏里的 <node> 示例不拦截段写入',
+    fenceErr === null && fenceW && /已写入/.test(String(fenceW.text)),
+    fenceErr ? fenceErr.message.slice(0, 90) : String(fenceW && fenceW.text).slice(0, 60),
+  )
+  const f2 = fs.readFileSync(path.join(kb4, 'lessons/fence2.md'), 'utf8')
+  ok('段写入后相邻段还在、旧正文已换', f2.includes('## 2 其它') && f2.includes('改过的正文') && !f2.includes('真内容'), f2.replace(/\n/g, '\\n'))
+
+  // CRLF 文件：写入后不得混进 LF
+  fs.writeFileSync(path.join(kb4, 'lessons/crlf.md'), '# C\r\n\r\n## 1 段\r\n\r\n旧\r\n\r\n## 2 段\r\n\r\n无关\r\n', 'utf8')
+  const libC = openLibrary(ctx4, ex, {})
+  const secC = [...libC.nodes.values()].find((n) => secFile(n, 'crlf.md'))
+  await tools4.kb_write.execute({ target: secC.tid, mode: 'node', content: '新的正文\n第二行' }, ex)
+  const cText = fs.readFileSync(path.join(kb4, 'lessons/crlf.md'), 'utf8')
+  ok('CRLF 文件写入后仍是纯 CRLF', !/(^|[^\r])\n/.test(cText), JSON.stringify(cText))
+
+  // <node> 块的闭合扫描也要跳过围栏：正文里的示例 </node> 不是真闭合
+  fs.writeFileSync(
+    path.join(kb4, 'lessons/nodefence.md'),
+    '# NF\n\n<node name="tmp:nf" type="tmp">\n正文\n\n```md\n</node>\n```\n\n尾\n</node>\n',
+    'utf8',
+  )
+  const libN = openLibrary(ctx4, ex, {})
+  ok('解析器跳过围栏里的 <node> 示例', libN.nodes.has('tmp:nf'), [...libN.nodes.keys()].join(','))
+  await tools4.kb_write.execute({ target: 'tmp:nf', mode: 'node', content: '新正文' }, ex)
+  const nf = fs.readFileSync(path.join(kb4, 'lessons/nodefence.md'), 'utf8')
+  ok(
+    '围栏里的 </node> 不再被当成闭合',
+    (nf.match(/<\/node>/g) || []).length === 1 && !/尾/.test(nf) && /新正文/.test(nf),
+    nf.replace(/\n/g, '\\n'),
+  )
+
   // 段里有 <node>：拒绝整段替换，而不是静默删掉
   fs.writeFileSync(path.join(kb4, 'lessons/sec2.md'), '# Sec2\n\n## 1 含节点\n\n<node name="tmp:in" type="tmp">\n内\n</node>\n', 'utf8')
   const lib7 = openLibrary(ctx4, ex, {})
@@ -1297,6 +1361,9 @@ section('tscl 定义与双语法')
   }
   const ctxA = { tools: { register: () => () => {} }, webServer: { register: () => () => {} }, get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-a' ? { header: { cwd: tmpA } } : null) } : null) }
   bindServices(ctxA)
+  // 先建仓库再让状态文件出现：真实顺序就是「建库 → 诊断时才写状态文件」
+  const { init: advInit, status: advStatus } = await import(url(path.join(root, 'lib/engine/vcs.js')))
+  advInit(kbA)
   const libA = openLibrary(ctxA, { agent: { id: 's-a' } }, {})
   const adv = computeAdvice(libA.nodes, libA.defs, libA.nodekb)
   ok('advice：碎片文件被建议合并', adv.some((a) => a.code === 'merge-fragments'))
@@ -1312,8 +1379,37 @@ section('tscl 定义与双语法')
   ok('无状态文件（旧库）也提醒一次', n0 && n0.code === 'plugin-updated' && /1\.5\.0 之前/.test(n0.message), JSON.stringify(n0))
   markSeen(kbA)
   ok('markSeen 写出状态文件', fs.existsSync(path.join(kbA, '.plugin-state.json')))
-  ok('markSeen 把状态文件加进 .gitignore', fs.readFileSync(path.join(kbA, '.gitignore'), 'utf8').includes('.plugin-state.json'))
+  // 1.5.3：状态文件改走 .git/info/exclude —— 诊断不该改动工作树里的 .gitignore
+  ok(
+    'markSeen 不再往 .gitignore 里追加',
+    !fs.existsSync(path.join(kbA, '.gitignore')) || !fs.readFileSync(path.join(kbA, '.gitignore'), 'utf8').includes('.plugin-state.json'),
+  )
   ok('提醒后即视为已看', updateNotice(kbA) === null)
+
+  // 有 git 时：状态文件被 exclude 掉，诊断前后工作树都干净
+  ok('库初始化后是干净的', advStatus(kbA).dirty === false, JSON.stringify(advStatus(kbA)))
+  fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.0' }), 'utf8')
+  updateNotice(kbA) // 触发 markSeen
+  ok('markSeen 后工作树仍干净', advStatus(kbA).dirty === false, JSON.stringify(advStatus(kbA)))
+  ok('状态文件进了 .git/info/exclude', fs.readFileSync(path.join(kbA, '.git/info/exclude'), 'utf8').includes('.plugin-state.json'))
+
+  // 一次性提醒不能把 advice 顶成 maxItems + 1 条
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  const tA = {}
+  const ctxB = {
+    tools: { register: (t) => { tA[t.name] = t; return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-a' ? { header: { cwd: tmpA } } : null) } : null),
+  }
+  buildTools(ctxB, { advice: { maxItems: 2 } })
+  fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.0' }), 'utf8')
+  const diagCap = await tA.kb_diag.execute({}, { agent: { id: 's-a' } })
+  ok(
+    'advice 条数不被一次性提醒顶破',
+    Array.isArray(diagCap.advice) && diagCap.advice.length === 2,
+    JSON.stringify((diagCap.advice || []).map((a) => a.code)),
+  )
+  ok('提醒排在 advice 最前', diagCap.advice[0] && diagCap.advice[0].code === 'plugin-updated', JSON.stringify((diagCap.advice || []).map((a) => a.code)))
   fs.writeFileSync(path.join(kbA, '.plugin-state.json'), JSON.stringify({ seen_version: '0.0.1' }), 'utf8')
   const n1 = updateNotice(kbA)
   ok('版本变化时提醒一次', n1 && n1.code === 'plugin-updated' && /0\.0\.1/.test(n1.message), JSON.stringify(n1))

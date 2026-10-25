@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.2
+version: 1.5.3
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -99,13 +99,14 @@ kb_write target=doc/03-...md          mode=append  content=...
 - 写完**看返回值里的校验结果**：悬空引用、重复定义、`<node>` 没独占一行，都会当场报回来。
 - 改已有内容用 `append` / `node`，不要 `replace` 整篇（会丢掉别人刚写的段落）。
 - 新建文件前先 `kb_read mode=toc` 确认没有同主题的旧文件。
-- 库是内嵌 git 仓库，**写入/改名成功后会自动快照**：commit message 形如 `autosnap: 3 处变更`，回执里有一行 `快照: autosnap: 3 处变更`。看历史用 `kb_vcs_status`（默认最近 5 条，`count` 可调）。不想要快照就配 `git: false`——建库、写入、改名都会跳过。
-- 段节点一旦写过 `<node>`/`<tscl>` 标签，这段就**不能再用 `mode=node` 改**（工具会拒绝，避免把结构改坏）。这种情况改走「路径 + `mode=replace`」，或者先 `kb_read` 出来整段重写。
+- 库是内嵌 git 仓库，**写入/改名成功后会自动快照**：commit message 形如 `autosnap: 3 处变更`，回执里有一行 `快照: autosnap: 3 处变更`。**写后自检有 error 时不再快照**（坏状态不进历史，回执会写明「未快照」），修好后的下一次写入会一并提交。看历史用 `kb_vcs_status`（默认最近 5 条，`count` 可调）。不想要快照就配 `git: false`——建库、写入、改名都会跳过。
+- 段节点一旦写过 `<node>`/`<tscl>` 标签，这段就**不能再用 `mode=node` 改**（工具会拒绝，避免把结构改坏）。这种情况改走「路径 + `mode=replace`」，或者先 `kb_read` 出来整段重写。围栏（``` / ~~~）里的标签是示例，不算数——写「教怎么用 nodekb」的段落可以放心放代码块。
+- 段边界只认围栏外的 `#`/`##`；文件原本用 CRLF 就继续用 CRLF（不会被写成混排）。
 
 ## 注意事项
 
 0. 库定位找不到时先 `kb_list`：它会写明本会话判定的工作区、来源（会话头 / 配置 / 面板）与每个库的绝对路径。已有的库用 `kb_register dir=<库目录> name=<名字>` 登记进项目的 `kb_registry.json`，不要让人去改插件配置。
-   0.1 插件升级后第一次跑 `kb_diag`，报告里会多出一条 `plugin-updated`：那是在提醒你「规则变了，先重读本技能」。每条库只提醒一次（记在 `.nodekb/.plugin-state.json`，已在 `.gitignore` 里）。
+   0.1 插件升级后第一次跑 `kb_diag`，报告里会多出一条 `plugin-updated`：那是在提醒你「规则变了，先重读本技能」。每条库只提醒一次（记在 `.nodekb/.plugin-state.json`，位置在 `.git/info/exclude` 里——诊断不会把库弄成「有未提交改动」）。
 1. 不要把整段对话贴进 `doc/` —— 记的是过程，不是结论。
 2. 不要把同一件事在 `doc/` 和 `lessons/` 各写一份 —— 抽成 `<tscl>` 定义，两处都引用它。
 
