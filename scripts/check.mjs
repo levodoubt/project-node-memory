@@ -27,6 +27,19 @@ const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 
 let pass = 0
 let fail = 0
+let gitSkipped = 0
+/**
+ * 跑一条 git 命令；受限沙箱里子进程会被拒（spawn EPERM），
+ * 这时该组断言跳过并计数，不让整套自检因为环境而崩掉。
+ */
+function gitOut(args) {
+  try {
+    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    gitSkipped += 1
+    return null
+  }
+}
 function ok(name, cond, detail) {
   if (cond) {
     pass += 1
@@ -259,6 +272,7 @@ try {
   threw = e
 }
 ok('client.js 可在脚本沙箱里执行', threw === null, threw && threw.message)
+ok('面板改名走同源 POST（不再用 GET 改盘）', /post\('\/rename'/.test(clientSrc) && !/get\('\/rename'/.test(clientSrc))
 ok('调用了 __ModuleLoader__.load', captured !== null)
 ok('load 的 id 是包名', captured && captured.id === pkg.name, captured && captured.id)
 ok('factory 是函数', captured && typeof captured.factory === 'function')
@@ -513,9 +527,25 @@ section('路由 HTTP 端到端')
       const unknown = await j('/nope')
       ok('未知端点回 404', unknown.status === 404)
 
-      const dry = await j(`/rename?lib=${lib}&target=${encodeURIComponent('doc:index')}&new_name=guide&dry_run=1`)
-      ok('GET /rename (dry_run) 报出新旧 TID', dry.status === 200 && dry.body.dry_run === true && dry.body.new_tid === 'doc:guide', JSON.stringify(dry.body).slice(0, 120))
+      const jpost = async (p, body, headers = {}) => {
+        const r = await fetch(base + p, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: JSON.stringify(body),
+        })
+        return { status: r.status, body: await r.json() }
+      }
+
+      const dry = await jpost(`/rename?lib=${lib}`, { target: 'doc:index', new_name: 'guide', dry_run: true })
+      ok('POST /rename (dry_run) 报出新旧 TID', dry.status === 200 && dry.body.dry_run === true && dry.body.new_tid === 'doc:guide', JSON.stringify(dry.body).slice(0, 120))
       ok('dry_run 不动文件', fs.existsSync(path.join(root, FIX, '.nodekb/doc/index.md')))
+
+      const viaGet = await j(`/rename?lib=${lib}&target=${encodeURIComponent('doc:index')}&new_name=guide2`)
+      ok('GET /rename 被拒（写操作只收 POST）', viaGet.status === 405, String(viaGet.status))
+      ok('GET /rename 没有真的改名', fs.existsSync(path.join(root, FIX, '.nodekb/doc/index.md')))
+
+      const cross = await jpost(`/rename?lib=${lib}`, { target: 'doc:index', new_name: 'guide9' }, { origin: 'http://evil.example' })
+      ok('跨源 POST /rename 被拒（403）', cross.status === 403, `${cross.status} ${JSON.stringify(cross.body).slice(0, 80)}`)
 
       // 面板显式给 ws 时必须被采纳（曾因 env/缓存优先级 bug 被忽略，导致库下拉永远是别的项目）
       const wsDir = path.join(root, '.tmp-ws')
@@ -1337,8 +1367,8 @@ section('tscl 定义与双语法')
   ok('vcs.init 建出仓库', vcsStatus(kb4).repo === true, gitMsg)
   const w2 = await tools4.kb_write.execute({ target: 'lessons/snap.md', mode: 'create', content: '# Snap\n\n快照测试\n' }, ex)
   ok('写入后回了快照', /快照:/.test(String(w2.text)), String(w2.text).split('\n').slice(0, 3).join(' | '))
-  const snapLog = execFileSync('git', ['-C', kb4, 'log', '--pretty=%s', '-n', '3'], { encoding: 'utf8' }).trim()
-  ok('git log 里有 autosnap', /autosnap: \d+ 处变更/.test(snapLog), snapLog.replace(/\n/g, ' | '))
+  const snapLog = gitOut(['-C', kb4, 'log', '--pretty=%s', '-n', '3'])
+  if (snapLog !== null) ok('git log 里有 autosnap', /autosnap: \d+ 处变更/.test(snapLog), snapLog.replace(/\n/g, ' | '))
   ok('工作树干净（已全部提交）', vcsStatus(kb4).dirty === false, JSON.stringify(vcsStatus(kb4)))
 
   fs.rmSync(tmp4, { recursive: true, force: true })
@@ -1449,10 +1479,12 @@ section('tscl 定义与双语法')
   const execG = { agent: { id: 's-g' } }
   ok('git:false 时 10 个工具照常注册', reg.size === 10, `size=${reg.size}`)
 
-  const before = execFileSync('git', ['-C', kbG, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()
+  const before = gitOut(['-C', kbG, 'rev-list', '--count', 'HEAD'])
   const wr = await reg.get('kb_write').execute({ target: 'doc/a.md', content: page('v2'), mode: 'replace' }, execG)
-  const after = execFileSync('git', ['-C', kbG, 'rev-list', '--count', 'HEAD'], { encoding: 'utf8' }).trim()
-  ok('config.git=false 关掉 autosnap', !wr.snapshot && after === before, `before=${before} after=${after}`)
+  const after = gitOut(['-C', kbG, 'rev-list', '--count', 'HEAD'])
+  if (before !== null && after !== null) {
+    ok('config.git=false 关掉 autosnap', !wr.snapshot && after === before, `before=${before} after=${after}`)
+  }
 
   // 改名：文件里的 <node tid="doc:a:…"> 必须跟着改，否则文件 TID 变了、嵌套节点还叫旧名
   const rn = await reg.get('kb_rename').execute({ target: 'doc/a.md', new_name: 'c.md' }, execG)
@@ -1483,8 +1515,163 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpG, { recursive: true, force: true })
 }
 
+// ── 13. 口径统一：TID 判定 / 段边界 / 属性引号 / 围栏 / 改名越界（反馈4 回归） ──────────
+{
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { writeInto } = await import(url(path.join(root, 'lib/engine/write.js')))
+  const { renameFileNode } = await import(url(path.join(root, 'lib/engine/rename.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+
+  const tmpF = path.join(root, '.tmp-f4')
+  fs.rmSync(tmpF, { recursive: true, force: true })
+  const kbF = path.join(tmpF, '.nodekb')
+  fs.mkdirSync(path.join(kbF, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(kbF, 'readme.md'), '# 库根\n\n库根正文。\n', 'utf8')
+  fs.writeFileSync(
+    path.join(kbF, 'doc/guide.md'),
+    [
+      '# 指南',
+      '',
+      "<node name='abi' parent='doc:guide'>",
+      '调用约定是 cdecl。',
+      '</node>',
+      '',
+      '## 1. 概述',
+      '',
+      '概述正文。',
+      '',
+      '### 1.1 细节',
+      '',
+      '细节正文。',
+      '',
+      '## 2. 附录',
+      '',
+      '~~~md',
+      '<node name="example-tid">',
+      '这是示例',
+      '</node>',
+      '示例引用：[[doc:tmp]]',
+      '~~~',
+      '',
+      '真引用：[[doc:tmp]]。',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  fs.writeFileSync(path.join(kbF, 'doc/tmp.md'), '# Tmp\n\n临时。\n', 'utf8')
+
+  const libF = { nodekb: kbF, nodes: parse_library(kbF, []) }
+
+  ok('单引号属性也能解析出节点', libF.nodes.has('abi'), [...libF.nodes.keys()].join(','))
+  ok('`## 1.` 编号段 TID 用编号', libF.nodes.has('doc:guide:1'), [...libF.nodes.keys()].filter((t) => t.startsWith('doc:guide')).join(','))
+
+  // ① 无冒号 TID：能就地写入，且不再在库根造出解析器看不见的垃圾文件
+  writeInto(libF, { target: 'abi', content: '调用约定改成了 cdecl2。' })
+  ok('无冒号的显式节点 TID 能就地改写', fs.readFileSync(path.join(kbF, 'doc/guide.md'), 'utf8').includes('cdecl2'))
+  ok('写 TID 不会在库根造同名文件', !fs.existsSync(path.join(kbF, 'abi')))
+
+  const readmeErr = (() => {
+    try {
+      writeInto(libF, { target: 'readme', content: '新正文' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('库根文件 TID 不再造垃圾文件', !fs.existsSync(path.join(kbF, 'readme')) && readmeErr !== null, readmeErr && readmeErr.message.slice(0, 80))
+
+  const junkErr = (() => {
+    try {
+      writeInto(libF, { target: 'nonsense', content: 'x' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('既不是 TID 也不像路径的 target 被拒', junkErr !== null && /没有名为/.test(junkErr.message) && !fs.existsSync(path.join(kbF, 'nonsense')), junkErr && junkErr.message.slice(0, 60))
+
+  // ② 段里含 `###` 子节：拒绝，而不是静默把子节删掉
+  const secErr = (() => {
+    try {
+      writeInto(libF, { target: 'doc:guide:1', content: '新概述。' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('段内更深的标题会被拒绝（不静默删子节）', secErr !== null && /结构|子节/.test(secErr.message), secErr && secErr.message.split('\n')[0].slice(0, 90))
+  ok('拒绝后子节与正文都还在', fs.readFileSync(path.join(kbF, 'doc/guide.md'), 'utf8').includes('### 1.1 细节'))
+
+  // ③ 改名不能把文件搬出库
+  const escErr = (() => {
+    try {
+      renameFileNode(libF, 'doc:tmp', '..\\..\\escaped')
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('new_name 带 .. 被拒', escErr !== null && /不能带目录|库外/.test(escErr.message), escErr && escErr.message.slice(0, 80))
+  ok('拒绝后文件仍在原位', fs.existsSync(path.join(kbF, 'doc/tmp.md')) && !fs.existsSync(path.join(tmpF, 'escaped.md')))
+
+  const slashErr = (() => {
+    try {
+      renameFileNode(libF, 'doc:tmp', 'sub/x.md')
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('new_name 带目录分隔符被拒', slashErr !== null && /不能带目录/.test(slashErr.message), slashErr && slashErr.message.slice(0, 60))
+
+  // ④ `~~~` 围栏里的 <node> 只是示例：不建节点、内容不抽走；围栏里的引用也不改名
+  ok('`~~~` 里的 <node> 不建节点', !libF.nodes.has('example-tid'))
+  ok('`~~~` 围栏原文完整', fs.readFileSync(path.join(kbF, 'doc/guide.md'), 'utf8').includes('这是示例'))
+  const rpTmp = renameFileNode(libF, 'doc:tmp', 'tmp2')
+  const afterRename = fs.readFileSync(path.join(kbF, 'doc/guide.md'), 'utf8')
+  ok('围栏里的引用不跟着改名（只改围栏外那 1 处）', rpTmp.rewritten.length === 1 && rpTmp.rewritten[0].count === 1, JSON.stringify(rpTmp.rewritten))
+  ok('围栏内的 `[[doc:tmp]]` 原样保留', afterRename.includes('示例引用：[[doc:tmp]]'), afterRename.split('\n').slice(-6).join('|'))
+  ok('围栏外的引用被改写', afterRename.includes('[[doc:tmp2]]'), afterRename.split('\n').slice(-3).join('|'))
+
+  // ⑤ 单引号属性在改名时也要跟着搬
+  renameFileNode(libF, 'doc:guide', 'guide9')
+  const guide2 = fs.readFileSync(path.join(kbF, 'doc/guide9.md'), 'utf8')
+  ok("改名也重写 parent='…'（单引号）", guide2.includes("parent='doc:guide9'") && !guide2.includes("parent='doc:guide'"), guide2.split('\n').slice(2, 5).join('|'))
+
+  const dgF = diag(parse_library(kbF, []), { libRoot: kbF, defs: new Map() })
+  ok('这一轮折腾后库里没有 error', dgF.report.errors.length === 0, JSON.stringify(dgF.report.errors))
+
+  // ⑥ 段写入时正文里带标题：劈段或拒绝，绝不能静默产出两个同名段
+  fs.writeFileSync(path.join(kbF, 'doc/sec.md'), ['# Sec', '', '## 1. 甲', '', '甲正文。', '', '## 2. 乙', '', '乙正文。', ''].join('\n'), 'utf8')
+  const libS = { nodekb: kbF, nodes: parse_library(kbF, []) }
+  ok('普通 ## 段解析出两条', libS.nodes.has('doc:sec:1') && libS.nodes.has('doc:sec:2'))
+  const secStripped = (() => {
+    try {
+      return writeInto(libS, { target: 'doc:sec:1', content: '## 1. 甲\n\n新甲正文。' })
+    } catch (e) {
+      return e
+    }
+  })()
+  const secFile = fs.readFileSync(path.join(kbF, 'doc/sec.md'), 'utf8')
+  ok('段写入：首行是本节标题时剥掉（不劈成两段）', !(secStripped instanceof Error) && (secFile.match(/## 1\. 甲/g) || []).length === 1, secStripped instanceof Error ? secStripped.message.slice(0, 90) : secFile.replace(/\n/g, '|'))
+  ok('段写入：正文换了、兄弟段还在', secFile.includes('新甲正文') && secFile.includes('乙正文'))
+
+  const secHeadErr = (() => {
+    try {
+      writeInto(libS, { target: 'doc:sec:1', content: '## 1. 甲\n\n甲正文2。\n\n### 挤进来的小节\n\n子内容。' })
+      return null
+    } catch (e) {
+      return e
+    }
+  })()
+  ok('段写入：正文里另带标题会被拒绝', secHeadErr !== null && /标题行/.test(secHeadErr.message), secHeadErr && secHeadErr.message.split('\n')[0].slice(0, 90))
+  ok('拒绝后文件没被改', !fs.readFileSync(path.join(kbF, 'doc/sec.md'), 'utf8').includes('子内容'))
+
+  fs.rmSync(tmpF, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
-console.log(`\n${pass} passed, ${fail} failed`)
+console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言
 process.exitCode = fail ? 1 : 0
 

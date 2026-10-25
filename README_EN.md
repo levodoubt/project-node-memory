@@ -184,6 +184,14 @@ Hard rules: `<node>` / `</node>` must each occupy an entire line; nothing inside
 as structure (a `##` there is not a heading); a `tscl` id may be defined exactly once and must not
 collide with a node TID.
 
+Fences (``` or ~~~, closing fence same char and at least as long) are opaque everywhere: `[[…]]`,
+`<node>`, `<tscl>` and `#` inside them are examples — not parsed, not counted as references, not
+renamed. Explicit node TIDs **need no colon** (`<node name="abi">` → TID `abi`), and attribute values
+accept single or double quotes alike. `kb_write`'s `target` resolves as: an existing TID → a root
+file name → a path (`.md` appended); anything else is refused instead of creating a stray file at the
+library root. `kb_rename`'s `new_name` must be a bare file name in the same directory (no separators,
+no `..`).
+
 A definition may also sit **inline in the middle of a sentence** — the tags are stripped when
 rendered and the value stays where it is written:
 
