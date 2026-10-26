@@ -82,6 +82,7 @@ config:
 The sidebar gains an icon (「项目节点知识库」); opening it gives a three-column center panel:
 
 - **Left**: node tree (`title · type · chars`), a search box that swaps in a hit list on Enter; below it **graph settings** — layout direction (vertical/horizontal), expansion depth, type filters (click to hide a type), expand-all / fit-view.
+- **Search mode** (1.5.10): matched terms are highlighted directly in the left hit list; clicking an entry re-points the right pane to that node and **scrolls to the first match**, while the hit list stays put so you can keep clicking other entries. Only the **×** at the right edge of the search box (or Esc) leaves search mode.
 - **Middle**: the **node graph**. A deterministic tree layout (parents left, children right — or top-down), node boxes stroked by type, wheel to zoom, drag to pan, click to select, double-click to collapse a branch; `+ / − / fit` and the current zoom ratio sit bottom-right.
 - **Right**: node content on top (**Markdown rendered**, `[[TID]]` clickable) and node properties below (tid, type, parent, source file line, chars, child sections, backlinks, rename button). The "raw" and "source" views stay monospace plain text.
 

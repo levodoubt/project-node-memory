@@ -388,6 +388,23 @@ ok('Icon() 返回 svg', (() => {
   ok('右栏正文有 10000 字符上限', clientSrc.includes('var TEXT_LIMIT = 10000') && clientSrc.includes('已显示前 '))
   // 原文/源码视图里的 [[tscl="x"]] 必须可点（曾经只有渲染视图能点，原文里是死文本）
   ok('原文/源码视图把宏点击接到 openDef', /onMacro:\s*openDef/.test(clientSrc) && /function openDef\(/.test(clientSrc))
+
+  // ── 检索态：× 退出、命中高亮、点条目只换预览不退出（1.5.9）────────────
+  ok('检索框右侧有「×」清空键', /className: 'nkb-qbox'/.test(clientSrc) && /nkb-qclear/.test(clientSrc))
+  ok('「×」只在有检索内容时出现', /query \|\| hits[\s\S]{0,80}nkb-qclear/.test(clientSrc))
+  ok('退出检索清空 query 与命中列表', /function exitSearch\(\) \{[\s\S]*?setQuery\(''\)[\s\S]*?setHits\(null\)/.test(clientSrc))
+  ok('点命中只换预览、不退出检索', /function openHit\(tid\) \{[\s\S]{0,220}setSel\(tid\)[\s\S]{0,220}setFocus/.test(clientSrc) && /openHit\(hit\.tid\)/.test(clientSrc))
+  ok('命中片段的命中词被高亮', /hlNodes\(String\(hit\.snippet/.test(clientSrc) && /mark\.nkb-hl\{[^}]*background/.test(clientSrc))
+  ok('预览点命中后滚到第一处高亮', /querySelector\('mark\.nkb-hl'\)/.test(clientSrc) && /scrollIntoView/.test(clientSrc))
+  ok('Esc 也能退出检索', /e\.key === 'Escape'/.test(clientSrc))
+  {
+    const runs = I.hlRuns('前后 doc:01 中', ['doc:01'])
+    ok('hlRuns 切出命中段', runs.length === 3 && runs[1].hit === true && runs[1].t === 'doc:01', JSON.stringify(runs))
+    ok('hlRuns 大小写不敏感', I.hlRuns('ABC abc', ['abc']).filter((r) => r.hit).length === 2)
+    ok('hlRuns 无词元时原样返回', (() => { const r = I.hlRuns('abc', []); return r.length === 1 && r[0].t === 'abc' && !r[0].hit })())
+    ok('同位置取最长的词', I.hlRuns('abcde', ['ab', 'abc'])[0].t === 'abc')
+    ok('hlTerms 按空白切词并小写', I.hlTerms('  Doc  A1 ').join('|') === 'doc|a1')
+  }
 }
 
 // LaTeX → MathML

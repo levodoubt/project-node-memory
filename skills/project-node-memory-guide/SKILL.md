@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.9
+version: 1.5.10
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
