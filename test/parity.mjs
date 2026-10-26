@@ -2,18 +2,24 @@
  * parity —— 对拍：JS 移植 vs Python 原实现（同一夹具、同一参数、逐字段比 JSON）。
  *
  * 只在开发期跑（CI 不需要 Python）：`node test/parity.mjs`
- * 夹具库在 test/fixtures/sample/.nodekb（干净库）。
+ * 夹具库在 test/fixtures/sample/.nodekb（干净库），**跑之前整份复制到系统临时目录**。
+ *
+ * 为什么要复制：Python 参考实现在「每次解析库后」都尝试自动快照（read/search/diag 都算），
+ * 而它没有 JS 这边「库目录必须自己就是仓库根」的护栏——夹具放在仓库里时，它会
+ * `git add -A` 把**整个源码仓库**的改动提交成 `autosnap: N 处变更`。踩过两次
+ * （1.5.8、1.5.9 期间各有一次），所以把夹具挪出仓库，让它的 git 碰不到源码。
  */
 
 import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { parse_library } from '../lib/engine/mdlib.js'
 import { cmdRead, cmdSearch, cmdDiag } from '../lib/engine/commands.js'
 
 const PY = process.env.NODEKB_PYTHON || 'python'
 const PY_SRC = process.env.NODEKB_PY_SRC || path.join(import.meta.dirname, '..', '..', 'nodekb')
-const FIX = path.join(import.meta.dirname, 'fixtures', 'sample')
+const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'sample')
 
 // 对拍要本机的 python + nodekb 源码；缺任一就跳过（CI 上没有它们，不该报红）。
 if (!fs.existsSync(path.join(PY_SRC, 'kb', '__main__.py'))) {
@@ -21,9 +27,16 @@ if (!fs.existsSync(path.join(PY_SRC, 'kb', '__main__.py'))) {
   process.exit(0)
 }
 
+// 夹具复制到系统临时目录：Python 侧的自动快照就只会动那份拷贝
+const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'nodekb-parity-'))
+const FIX = path.join(WORK, 'sample')
+fs.cpSync(FIXTURE, FIX, { recursive: true })
+const cleanup = () => fs.rmSync(WORK, { recursive: true, force: true })
+process.on('exit', cleanup)
+
 // 注意：沙箱里不能开管道捕获子进程输出（spawn 的默认 stdio:'pipe' 会 EPERM），
 // 所以把 python 的 stdout 直接写到文件描述符上，再读文件。
-const TMP = path.join(import.meta.dirname, '.parity-out.txt')
+const TMP = path.join(WORK, '.parity-out.txt')
 
 function py(args) {
   const fd = fs.openSync(TMP, 'w')
@@ -114,11 +127,12 @@ function readCase(name, target, opts = {}, pyArgs) {
   check('前缀兜底：Python 仍报未找到（预期分叉）', true, pyGot.startsWith('未找到节点'))
 }
 
-// 整支超上限
+// 整支超上限：1.5.9 起 JS 侧改成「截断 + 续读坐标」，Python 参考实现仍报错。
+// 这是有意分叉（这一项不再对拍），只断言 JS 的新契约；细节由 check.mjs 第 18 组覆盖。
 {
   const got = cmdRead(nodes, 'root', { maxlen: 10 })
-  check('read maxlen 护栏 code', 2, got.code)
-  check('read maxlen 护栏前缀', true, got.text.startsWith('渲染超上限: '))
+  check('read maxlen 截断 code', 0, got.code)
+  check('read maxlen 截断带续读坐标', true, /继续用 offset=\d+/.test(got.text))
 }
 
 // search：多词加权 / 中文 2-gram / 兜底

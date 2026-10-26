@@ -1889,6 +1889,11 @@ section('tscl 定义与双语法')
   const toolsSrc6 = fs.readFileSync(path.join(root, 'lib/host/tools.js'), 'utf8')
   ok('kb_rename 先自检再快照', /if \(errs === 0 && config\.git !== false\) snap = maybeAutosnap/.test(toolsSrc6))
 
+  // ⑧ 对拍夹具必须先复制出仓库：Python 参考实现每次解析后自动快照，且没有「库目录自己是仓库根」
+  //    的护栏，夹具留在仓库里时会把整个源码仓库提交成 autosnap（1.5.8、1.5.9 各踩一次）
+  const paritySrc = fs.readFileSync(path.join(root, 'test/parity.mjs'), 'utf8')
+  ok('对拍夹具复制到临时目录（不再污染源码仓库）', /mkdtempSync\(/.test(paritySrc) && /const FIX = path\.join\(WORK, 'sample'\)/.test(paritySrc), paritySrc.slice(0, 0))
+
   fs.rmSync(tmpG, { recursive: true, force: true })
 }
 
@@ -2055,6 +2060,65 @@ section('tscl 定义与双语法')
   ok('没铺 doc 时 entry 不引用 doc:00-overview', !/doc:00-overview/.test(entryBare), entryBare.split('\n').slice(0, 3).join(' | '))
 
   fs.rmSync(tmpI, { recursive: true, force: true })
+}
+
+// ── 18. 1.5.9：行号表 / 行窗读 / find / search lines / 超限续读 ─────────────
+{
+  section('行号表、行窗读、find、search lines、超限续读（1.5.9）')
+  const tmpJ = path.join(root, '.tmp-lines')
+  fs.rmSync(tmpJ, { recursive: true, force: true })
+  const kbJ = path.join(tmpJ, '.nodekb')
+  fs.mkdirSync(path.join(kbJ, 'doc'), { recursive: true })
+  // 行号可手数：1=H1 2=空 3=## 1. 甲 4=空 5=第一行 6=第二行 7=第三行(needle) 8=空 9=## 2. 乙
+  const bodyJ = ['# 行号探针', '', '## 1. 甲', '', '第一行正文。', '第二行正文。', '第三行正文 needle。', '', '## 2. 乙', '', '乙的正文。', ''].join('\n')
+  fs.writeFileSync(path.join(kbJ, 'doc/lines.md'), bodyJ, 'utf8')
+
+  const regJ = new Map()
+  const ctxJ = {
+    tools: { register: (t) => { regJ.set(t.name, t); return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-l' ? { header: { cwd: tmpJ } } : null) } : null),
+  }
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  buildTools(ctxJ, { git: false })
+  const execJ = { agent: { id: 's-l' } }
+  const { openLibrary } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const libJ = openLibrary(ctxJ, execJ, {})
+
+  // ① 行号表与源文件对齐（trim 掉的前导空行要同步裁掉）
+  const secJ = libJ.nodes.get('doc:lines:1')
+  ok('节点正文行号表与源文件对齐', JSON.stringify(secJ.lines) === JSON.stringify([5, 6, 7]), JSON.stringify(secJ.lines))
+
+  // ② 行窗读：头部同时给文件行号与本节点行号，并给续读坐标
+  const winJ = await regJ.get('kb_read').execute({ target: 'doc:lines:1', mode: 'node', offset: 2, limit: 1 }, execJ)
+  ok('行窗读回文件行号', /doc\/lines\.md#L6-L6/.test(winJ.text), winJ.text.split('\n')[0])
+  ok('行窗读只回窗口那一行', winJ.text.includes('第二行正文。') && !winJ.text.includes('第一行正文。'), winJ.text)
+  ok('行窗读给出续读 offset', /offset=3/.test(winJ.text), winJ.text.split('\n').slice(-1)[0])
+  const plainJ = await regJ.get('kb_read').execute({ target: 'doc:lines:1', mode: 'node' }, execJ)
+  ok('不传 offset/limit 时行为不变（无定位头）', !plainJ.text.startsWith('['), plainJ.text.slice(0, 20))
+
+  // ③ find：只给命中行，行号是文件行号
+  const findJ = await regJ.get('kb_read').execute({ target: 'doc:lines:1', find: 'needle' }, execJ)
+  ok('find 给出命中的文件行号', /doc\/lines\.md#L7/.test(findJ.text), findJ.text)
+  ok('find 的路径是库内相对路径（不是绝对路径）', /(^|\n)doc\/lines\.md#L7/.test(findJ.text) && !/[A-Za-z]:[\\/]/.test(findJ.text), findJ.text)
+  ok('find 不返回整段正文', !findJ.text.includes('第一行正文。'), findJ.text)
+  const missJ = await regJ.get('kb_read').execute({ target: 'doc:lines:1', find: '不存在的词' }, execJ)
+  ok('find 未命中时如实说未命中', /未命中/.test(missJ.text), missJ.text)
+
+  // ④ 超 maxlen 不再报错：截断 + 续读坐标
+  const clipJ = await regJ.get('kb_read').execute({ target: 'root', maxlen: 40 }, execJ)
+  ok('超 maxlen 改为截断而不是报错', /\[整支第 1–\d+ 行 \/ 共 \d+ 行\]/.test(clipJ.text), clipJ.text.split('\n')[0])
+  ok('截断后给出续读 offset', /继续用 offset=\d+/.test(clipJ.text), clipJ.text.split('\n').slice(-1)[0])
+
+  // ⑤ kb_search lines：每个命中节点最多 3 条行级命中
+  const { search } = await import(url(path.join(root, 'lib/engine/search.js')))
+  const resJ = search(libJ.nodes, 'needle', { lines: true })
+  const hitJ = resJ.hits[0]
+  ok('search lines 带回行级命中', !!hitJ && Array.isArray(hitJ.lines) && hitJ.lines.some((l) => l.line === 7), hitJ && JSON.stringify(hitJ.lines))
+  const resNo = search(libJ.nodes, 'needle', {})
+  ok('不传 lines 时不带行级命中（默认不变）', resNo.hits[0] && resNo.hits[0].lines === undefined)
+
+  fs.rmSync(tmpJ, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

@@ -15,9 +15,10 @@ Agent 默认靠 `read` / `grep` / `glob` 找东西，代价是**试探**：grep 
 | 先看结构再读正文                    | `kb_read mode=toc`     | 一次 ~200 token 的目录视图替代整篇 read           |
 | 稳定 TID 寻址（`doc:03-build:3.1`） | `kb_read target=…`     | 不受行号漂移影响；改文件不打断引用                |
 | 引用就地展开（转写）                | `kb_read mode=subtree` | 一次拿到装配好的上下文，不用手动拼                |
+| 大节点分窗读 / 找词只要命中行       | `kb_read offset/limit/find` | 17k 字符的段不用整段吃进上下文               |
 | 结构自检                            | `kb_diag`              | 悬空引用 / 引用位置型段落 / 循环 / 孤儿，改完就查 |
 
-返回文本体积设有硬闸：`mode=subtree` 超过 `maxlen`（默认 50000 字符）直接报错，并告知改用 `toc` / `node`，而不是悄悄截断。
+返回文本体积设上限：`mode=subtree` 超过 `maxlen`（默认 50000 字符）会**截断到行边界**，并在结尾给出 `offset=` 续读坐标（`maxlen=0` 仍可强取全量）——不静默丢内容，也不因为「太长」整次调用失败。
 
 ## 怎么让 Agent 真的用它
 
@@ -94,8 +95,8 @@ config:
 | 工具            | 干什么                                                                                                                                       |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kb_list`       | 有哪些库（含绝对路径与来源）、本会话判定的工作区。不确定传什么 `kb` 时先调它                                                                 |
-| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`                                                                       |
-| `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段                                                           |
+| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`；另有 `offset` / `limit`（行窗）与 `find`（只回命中行，带文件行号）  |
+| `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段；`lines: true` 再加每节点 ≤3 条行级命中                |
 | `kb_diag`       | 结构自检：`errors` / `warnings` / `advice` 三档；`advice` 是「还能更省」的改进建议，不影响退出码                                             |
 | `kb_backlinks`  | 谁引用了它。改 TID / 删节点前先跑                                                                                                            |
 | `kb_init`       | 建 `.nodekb` 骨架（幂等），默认铺出 `doc/ lessons/ todo/ index/` 与落位约定；`parts` 只要其中几个                                            |
@@ -308,3 +309,5 @@ node test/parity.mjs        # 与 Python 原实现逐条对拍（需要 python �
 ## License
 
 MIT
+<!-- probe -->
+<!-- probe -->

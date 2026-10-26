@@ -15,9 +15,10 @@ By default an agent reaches for `read` / `grep` / `glob`, and pays for **trial a
 | Look at structure before text | `kb_read mode=toc` | A ~200-token outline instead of a full read |
 | Stable TID addressing (`doc:03-build:3.1`) | `kb_read target=…` | No line-number drift; moving text doesn't break references |
 | In-place reference expansion (transclusion) | `kb_read mode=subtree` | Assembled context in one call instead of manual stitching |
+| Window into a big node / find one word | `kb_read offset/limit/find` | A 17k-character section no longer has to enter the context whole |
 | Structure self-check | `kb_diag` | Dangling refs, refs to positional sections, cycles, orphans — check right after editing |
 
-There is a hard size gate too: a `mode=subtree` render above `maxlen` (default 50,000 characters) fails loudly and tells you to use `toc` / `node` instead of silently truncating.
+Renders are size-capped too: a `mode=subtree` render above `maxlen` (default 50,000 characters) is cut at a line boundary, and the tail of the reply carries an `offset=` to continue from (`maxlen=0` still forces the full text) — nothing is dropped silently, and a long render no longer fails the whole call.
 
 ## Making the agent actually use it
 
@@ -94,8 +95,8 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | Tool | What it does |
 |---|---|
 | `kb_list` | Which libraries exist (absolute paths and origins) plus the workspace this call resolved to. Call this first when unsure what `kb` to pass |
-| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen` |
-| `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet |
+| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen`; plus `offset` / `limit` (line window) and `find` (matching lines only, with file line numbers) |
+| `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet; `lines: true` adds up to 3 line hits per node |
 | `kb_diag` | Structure self-check in three tiers: `errors` / `warnings` / `advice`; `advice` is "could be leaner" guidance and never affects the exit code |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
 | `kb_init` | Scaffold `.nodekb` (idempotent): `doc/ lessons/ todo/ index/` plus placement conventions; `parts` narrows which directories it lays out |
