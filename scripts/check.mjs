@@ -377,6 +377,24 @@ ok('Icon() 返回 svg', (() => {
   ok('连线从框底出发', I.edgePath({ x: 0, y: 0, h: 58 }, { x: 0, y: 100, h: 34 }, true).startsWith('M94,58'), I.edgePath({ x: 0, y: 0, h: 58 }, { x: 0, y: 100, h: 34 }, true))
   ok('方框宽度保持 188', I.NODE_W === 188 && I.NODE_MAX_CHARS === 30)
 
+  // 换行不拆连续单词：放不下就整个词搬到下一行
+  const mix = gl('用 pip 安装 ASCII 表格再跑 kb_read')
+  ok('连续单词不被拆开', mix.lines.every((ln) => !/(^|\s)pi$|^p\b|ASCI$|^I\s/.test(ln)) &&
+    mix.lines.join(' ').includes('pip') && mix.lines.join(' ').includes('ASCII'), JSON.stringify(mix.lines))
+  const words = gl('kkkkkkkkk kkkkkkkkk kkkkkkkkk')
+  ok('放不下的词整体换行', words.lines.length === 2 && words.lines.every((ln) => ln.split(' ').every((w) => w.length === 9)),
+    JSON.stringify(words.lines))
+  // 30 字符预算落在词中间时，退到词边界而不是切半个词
+  const edge = gl('一二三四五六七八九十一二三四五六七八九十一二三四 pip install')
+  ok('预算截断退到词边界（不含半个 install）',
+    edge.truncated && !edge.lines.join('').includes('inst') && /pip…$/.test(edge.lines[edge.lines.length - 1]),
+    JSON.stringify(edge))
+  const oneLongWord = gl('a'.repeat(40))
+  ok('单词本身超预算时硬切且不丢字符超预算', oneLongWord.lines.join('').replace(/…$/, '').length <= I.NODE_MAX_CHARS, JSON.stringify(oneLongWord))
+  // 标点禁则：收尾标点不另起一行
+  const punct = gl('打包与发布链路（pnpm link → GitHub Actions（OIDC））')
+  ok('收尾标点不另起一行', punct.lines.slice(1).every((ln) => !/^[，。、；：！？）》」』】]/.test(ln)), JSON.stringify(punct.lines))
+
   // 渲染层：方框真的按行数变高、标题真的拆成多行 tspan
   const rendered = I.Graph({
     root: tallRoot, dir: 'TB', maxDepth: 9, hidden: {}, collapsed: {},
