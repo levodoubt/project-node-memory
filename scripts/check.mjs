@@ -353,6 +353,47 @@ ok('Icon() 返回 svg', (() => {
   const col = I.layoutGraph(root, { dir: 'TB', maxDepth: 9, hidden: {}, collapsed: { a: true } })
   ok('折叠节点不再展开子节点', !col.items.some((i) => i.tid === 'a:1'))
   ok('edgePath 产出 SVG path', /^M[\d.]+,/.test(I.edgePath({ x: 0, y: 0 }, { x: 100, y: 100 }, true)))
+
+  // 1.5.10：方框宽度固定、高度随标题行数变（最长 30 字符，超出省略号，最多换 3 行）
+  const gl = I.graphTitleLines
+  const one = gl('短标题')
+  ok('短标题不换行也不省略', one.lines.length === 1 && !one.truncated && one.lines[0] === '短标题', JSON.stringify(one))
+  const long = gl('长'.repeat(40))
+  ok('超长标题截到 30 字符以内并补省略号',
+    long.truncated && long.lines.join('').replace(/…$/, '').length === 30 && /…$/.test(long.lines[long.lines.length - 1]),
+    JSON.stringify(long))
+  ok('超长标题最多 3 行', long.lines.length <= 3, String(long.lines.length))
+  const wide = gl('a'.repeat(30))
+  ok('30 个半角字符不省略', !wide.truncated && wide.lines.join('') === 'a'.repeat(30))
+  ok('换行后的行宽不超框宽', long.lines.every((ln) => ln.length <= 30) && long.lines.length >= 2, JSON.stringify(long.lines.map((l) => l.length)))
+  const tallRoot = mk('root', 'root', [
+    { tid: 'long', title: '很长的标题'.repeat(6), type: 'doc', kind: 'section', children: [mk('deep', 'doc')] },
+    mk('b', 'todo'),
+  ])
+  const tall = I.layoutGraph(tallRoot, { dir: 'TB', maxDepth: 9, hidden: {}, collapsed: {} })
+  const tallIt = tall.items.find((i) => i.tid === 'long')
+  ok('长标题节点被撑高', tallIt.h > I.NODE_H && tallIt.lines.length >= 2, `${tallIt.h}/${tallIt.lines.length}`)
+  ok('下层据此下移（不重叠）', tall.items.find((i) => i.tid === 'deep').y >= tallIt.y + tallIt.h + 20)
+  ok('连线从框底出发', I.edgePath({ x: 0, y: 0, h: 58 }, { x: 0, y: 100, h: 34 }, true).startsWith('M94,58'), I.edgePath({ x: 0, y: 0, h: 58 }, { x: 0, y: 100, h: 34 }, true))
+  ok('方框宽度保持 188', I.NODE_W === 188 && I.NODE_MAX_CHARS === 30)
+
+  // 渲染层：方框真的按行数变高、标题真的拆成多行 tspan
+  const rendered = I.Graph({
+    root: tallRoot, dir: 'TB', maxDepth: 9, hidden: {}, collapsed: {},
+    sel: null, onSelect() {}, onToggleCollapse() {}, fitTick: 0,
+  })
+  const rects = []
+  const texts = []
+  ;(function walk(n) {
+    if (!n || typeof n !== 'object') return
+    if (Array.isArray(n)) { n.forEach(walk); return }
+    if (n.type === 'rect') rects.push(n.props || {})
+    if (n.type === 'text') texts.push(n)
+    ;(n.children || []).forEach(walk)
+  })(rendered)
+  ok('渲染出的方框用了自适应高度', rects.some((p) => p.height > I.NODE_H), JSON.stringify(rects.map((r) => r.height)))
+  ok('长标题拆成多个 tspan', texts.some((t) => (t.children || []).flat().filter((c) => c && c.type === 'tspan').length >= 2))
+  ok('没有 DOM 度量也能排（不依赖 document）', typeof I.graphTitleLines('测试').lines.length === 'number')
 }
 
 // markdown 渲染：块解析是纯函数，先测数据形状再测组件
