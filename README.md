@@ -68,7 +68,7 @@ dsh plugin add ./project-node-memory-<版本>.tgz
 | `prompt.enabled` | `true`                                                                  | 是否注册系统提示词段落                                        |
 | `skill.enabled`  | `true`                                                                  | 是否把随包 Skill 注册进宿主 `skills` 服务                     |
 | `git`            | `true`                                                                  | 库内嵌 git 快照：每次 `kb_write` 后自动 commit；`false` 关掉  |
-| `advice`         | `{ minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | `kb_diag` 第三档 `advice` 的阈值与条数上限                    |
+| `advice`         | `{ display: true, minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | `kb_diag` 第三档 `advice`：`display: false` 整块关掉，`limit` 控条数（`0` = 不限），其余是阈值 |
 
 `exclude` 默认忽略这些名字：`tmp`、`tmp_*`、`temp*`、`.tmp*`、`*_probe`、`nodekb_lab`、`__pycache__`、`_release_assets`、`venv`。临时目录、探针目录里的 `.nodekb` 通常是实验残渣，列进选择器只会碍事。要放行某个目录写 `"!tmp_keep"`；要额外忽略写 `"scratch"`（与默认名单叠加）。
 
@@ -96,7 +96,7 @@ config:
 | 工具            | 干什么                                                                                                                                       |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kb_list`       | 有哪些库（含绝对路径与来源）、本会话判定的工作区。不确定传什么 `kb` 时先调它                                                                 |
-| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`；另有 `offset` / `limit`（行窗）与 `find`（只回命中行，带文件行号）  |
+| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`；`toc` 默认只展开两层（`depth` 可调，`0` = 只看本节点）；另有 `offset` / `limit`（行窗）与 `find`（只回命中行，带文件行号） |
 | `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段；`lines: true` 再加每节点 ≤3 条行级命中                |
 | `kb_diag`       | 结构自检：`errors` / `warnings` / `advice` 三档；`advice` 是「还能更省」的改进建议，不影响退出码                                             |
 | `kb_backlinks`  | 谁引用了它。改 TID / 删节点前先跑                                                                                                            |
@@ -113,6 +113,8 @@ config:
 - `errors`：悬空引用、重复 TID、重复定义、树环、未闭合的 `<node>` / `<tscl>` —— 库结构已坏，必修。
 - `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点，**散文/行内代码里形如 TID 的文本解析不了**（`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`）、**TID 大小写不合规**（`→ 应写「doc:01-real」`），以及**违反本库 `rules.json` 的规矩**（见下）——按需处理。
 - `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个「整篇不足 500 字符」的 md（按整篇算：导语 + 全部 `##` 段 + `<node>` 正文，所以「一文件一章节」不会被误判）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 10000 字符（`fix` 会点明拆节会让位置型 TID 漂移）。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
+
+`advice` 也能管（1.5.15）：`advice: { display: false }` 整块关掉（刻意松散的库看建议只会分心）、`advice: { limit: 10 }` 控条数（`0` = 全部给出）、`advice: { maxItems: 10 }` 改默认上限；逐条豁免写 `diag_ignore.json` 的第四项 `advice: [{code, tid}]`（`code` 与 `tid` 都是正则，同时命中才压掉）。
 
 小节的父节点**恒为文件节点**：同一份文件里「按 `##` 组织」和「具名 `<node>` 锚点」并存时，TOC 里两者是并列的，不会再串成 `3.1 → lesson1 → 3.2` 的链。
 
@@ -145,6 +147,7 @@ nodekb list --all
 nodekb read doc:03-semantics --kb about-node-memory --find 行号
 nodekb search "回归闸门" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # 退出码 0/2，脚本里直接判
+nodekb diag --kb F:/proj --json --out out.json   # Windows 管道会坏中文，落文件最省事
 nodekb write doc:05-x --kb F:/proj --file 新正文.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
 nodekb rename --batch 计划.json --kb F:/proj --dry-run   # 批量改名，逐条重读库、中途失败即停
@@ -152,6 +155,7 @@ nodekb vcs log --kb F:/proj --count 5
 ```
 
 - 库定位：`--kb <库名|库目录|任意目录>`，省略时用当前目录的 `.nodekb`。命令行里显式给路径即授权，不受工作区白名单限制。
+- **库名两边一致**（1.5.15）：插件启动时会把生效配置（`registries` / `libraries` / `workspace` / `exclude` / `advice`）抄到 `~/.dsh/nodekb/config.json`，命令行据此算名字——工具层认的 `kb="filmmeasure"`，命令行 `--kb filmmeasure` 同样认；`config.libraries` 里写技能目录或 `.nodekb` 本身都能定位。
 - 每个命令都支持 `--json`，字段与工具层 `format: "json"` 一致；读命令退出码 `0` 成功、`1` 无命中、`2` 参数错或自检有 error。
 - 工具层与命令行**共用同一份引擎**（`lib/engine/*`），没有第二套判定逻辑；`require('project-node-memory/engine')` 或 `import … from 'project-node-memory/engine/mdlib.js'` 可直接拿解析器，不必再按绝对路径 import 源码。
 

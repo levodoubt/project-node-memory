@@ -2294,6 +2294,16 @@ section('tscl 定义与双语法')
   }
   ok('CLI search --json --lines 带行级命中', !!searchJson && JSON.stringify(searchJson).includes('"line"'), cliSearch.out.slice(0, 100))
   ok('CLI list --kb 认路径并报节点数', /节点 \/ \d+ 定义/.test(run(['list', '--kb', kbK]).out), run(['list', '--kb', kbK]).out.trim())
+  const outFile = path.join(tmpK, 'diag-out.json')
+  const cliOut = run(['diag', '--kb', kbK, '--json', '--out', outFile])
+  let outJson = null
+  try {
+    outJson = JSON.parse(fs.readFileSync(outFile, 'utf8'))
+  } catch {
+    outJson = null
+  }
+  ok('CLI --out 落文件且是干净 UTF-8（无 BOM）', !!outJson && typeof outJson.exit_code === 'number' && fs.readFileSync(outFile)[0] !== 0xef, cliOut.out.slice(0, 80))
+  ok('CLI --out 回执给相对路径与字符数', /已写入 .*（\d+ 字符，UTF-8）/.test(cliOut.out), cliOut.out.trim())
   ok('CLI 名字找不到时报出可用库', /未注册的库/.test(run(['read', 'doc:x', '--kb', 'no-such-lib-xyz']).out), '')
 
   // format=json：工具层把结构化字段原样给出，kb_diag 也不再抛异常
@@ -2432,6 +2442,133 @@ section('tscl 定义与双语法')
   ok('package.json 的 files 收进 skills（references 会随包发出）', Array.isArray(pkg.files) && pkg.files.includes('skills'), JSON.stringify(pkg.files))
   const refChars = refFiles.reduce((n, f) => n + fs.readFileSync(path.join(refDir, f), 'utf8').length, 0)
   console.log(`      SKILL.md ${skillSrc.length} 字符 + references ${refFiles.length} 份共 ${refChars} 字符（按需加载）`)
+}
+
+// ── 22. 1.5.15：库名统一 / advice 可见可调 / 段语义 / 目录折叠 / 举例提示 ────
+{
+  section('1.5.15 反馈回归')
+  const tmpQ = path.join(root, '.tmp-q15')
+  fs.rmSync(tmpQ, { recursive: true, force: true })
+  const kbQ = path.join(tmpQ, 'libs', 'filmmeasure', '.nodekb')
+  fs.mkdirSync(path.join(kbQ, 'doc'), { recursive: true })
+  const longBody = '长段正文'.repeat(120) // 600 字符，配 longSection=300 就能命中
+  fs.writeFileSync(
+    path.join(kbQ, 'doc/01-a.md'),
+    [
+      '# A 文档',
+      '',
+      '## 1. 长段',
+      '',
+      longBody,
+      '',
+      '## 2. 短段',
+      '',
+      '真引用：[[node="doc:01-gone"]]',
+      '举例写法：`[[node="doc:01-gone"]]` 与 `doc:01-gone`',
+      '',
+      '### 2.1 子节',
+      '',
+      '子节正文。',
+      '',
+      '## 3. 改名目标',
+      '',
+      '旧正文。',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const { computeAdvice } = await import(url(path.join(root, 'lib/engine/advice.js')))
+  const { toc_lines } = await import(url(path.join(root, 'lib/engine/render.js')))
+  const { writeInto } = await import(url(path.join(root, 'lib/engine/write.js')))
+  const { rememberConfig, loadConfig } = await import(url(path.join(root, 'lib/engine/config.js')))
+  const { listLibraries } = await import(url(path.join(root, 'lib/engine/registry.js')))
+
+  const nodesQ = parse_library(kbQ, [])
+  const defsQ = collectDefs(nodesQ).defs
+
+  // ① 例句被当成引用：只报一条，并且告诉人「举例请用反引号」
+  const dQ = diag(nodesQ, { problems: [], libRoot: kbQ, defs: defsQ })
+  const errQ = dQ.report.errors.join('\n')
+  const warnQ = dQ.report.warnings.join('\n')
+  ok('悬空引用的文案给出「举例请用反引号」的出口', /举例请用反引号/.test(errQ), errQ.split('\n')[0] || '')
+  ok('同一处不再重复报「不可解析的 TID 文本」', !/不可解析的 TID 文本[^\n]*doc:01-gone/.test(warnQ), warnQ.split('\n').find((l) => /doc:01-gone/.test(l)) || '')
+
+  // ② 目录视图默认折叠：大库 mode=toc 不该把整棵树都吐出来
+  const tocDefault = toc_lines(nodesQ, 'doc:01-a')
+  ok('toc 默认展开到子节一层', tocDefault.length === 4 && /doc:01-a:1/.test(tocDefault.join('\n')), `${tocDefault.length} 行`)
+  ok('toc 仍保留 tid · 标题 · 字符数', /doc:01-a · .* · \d+ 字符/.test(tocDefault[0]), tocDefault[0])
+  const tocShallow = toc_lines(nodesQ, 'doc:01-a', 0, { depth: 0 })
+  ok('toc depth=0 只列本节点，子节折叠成一句带继续坐标', tocShallow.length === 2 && /3 个子节未展开：继续用 kb_read target=doc:01-a mode=toc/.test(tocShallow[1]), tocShallow.join(' | '))
+  const tocDeep = toc_lines(nodesQ, 'doc:01-a', 0, { depth: 4 })
+  ok('toc depth 参数能放开折叠', tocDeep.length > tocShallow.length && /doc:01-a:2/.test(tocDeep.join('\n')), `${tocDeep.length} vs ${tocShallow.length}`)
+
+  // ③ 段写入：首行给同级标题＝连标题一起换；给更深标题＝拒绝；贴回原标题＝剥掉
+  const libQ = () => ({ nodekb: kbQ, nodes: parse_library(kbQ, []), defs: collectDefs(parse_library(kbQ, [])).defs })
+  const secTid = [...libQ().nodes.values()].find((n) => n.kind === 'section' && /改名目标/.test(n.title || ''))
+  const w1 = writeInto(libQ(), { target: secTid.tid, content: '## 3. 改名之后\n\n新正文。' })
+  const afterW1 = fs.readFileSync(path.join(kbQ, 'doc/01-a.md'), 'utf8')
+  ok('首行同级标题＝连标题一起改', w1.mode === 'node' && /## 3\. 改名之后/.test(afterW1) && !/## 3\. 改名目标/.test(afterW1), afterW1.slice(-60))
+  ok('改标题后兄弟段还在', /## 2\. 短段/.test(afterW1) && /子节正文/.test(afterW1), '')
+  let deepErr = ''
+  try {
+    writeInto(libQ(), { target: secTid.tid, content: '### 3.1 更深的子节\n\n正文。' })
+  } catch (e) {
+    deepErr = e.message
+  }
+  ok('更深标题仍被拒绝（会静默开子节）', /更深/.test(deepErr), deepErr.slice(0, 60))
+  const w3 = writeInto(libQ(), { target: secTid.tid, content: '## 3. 改名之后\n\n贴回来的正文。' })
+  const afterW3 = fs.readFileSync(path.join(kbQ, 'doc/01-a.md'), 'utf8')
+  ok('贴回同名标题被剥掉，不会出现第二个同名段', (afterW3.match(/## 3\. 改名之后/g) || []).length === 1 && w3.bytes > 0, String((afterW3.match(/## 3\./g) || []).length))
+
+  // ④ advice：阈值可配、可关、条数可控、可被 diag_ignore 压掉
+  ok('advice 阈值来自配置（longSection=300 命中）', computeAdvice(nodesQ, defsQ, kbQ, { longSection: 300 }).some((a) => a.code === 'long-section'), JSON.stringify(computeAdvice(nodesQ, defsQ, kbQ, { longSection: 300 }).map((a) => a.code)))
+  ok('advice display=false 时整块关闭', computeAdvice(nodesQ, defsQ, kbQ, { display: false }).length === 0, '')
+  ok('advice 默认按 maxItems=1 截断', computeAdvice(nodesQ, defsQ, kbQ, { longSection: 300, maxItems: 1 }).length === 1, '')
+  ok('advice limit=0 表示不设上限', computeAdvice(nodesQ, defsQ, kbQ, { longSection: 300, maxItems: 1, limit: 0 }).length >= 1, '')
+  fs.writeFileSync(path.join(kbQ, 'diag_ignore.json'), JSON.stringify({ advice: [{ code: 'long-section' }] }), 'utf8')
+  const advIgnored = diag(nodesQ, { problems: [], libRoot: kbQ, defs: defsQ, advice: computeAdvice(nodesQ, defsQ, kbQ, { longSection: 300 }) })
+  const codesIgnored = advIgnored.report.advice.map((a) => a.code)
+  ok('diag_ignore 的 advice 规则只压命中的那几条', !codesIgnored.includes('long-section') && codesIgnored.length > 0, codesIgnored.join(','))
+  fs.rmSync(path.join(kbQ, 'diag_ignore.json'))
+
+  // ⑤ 命令行与工具层认同一套库名：插件把配置抄到 ~/.dsh/nodekb/config.json
+  const cfgFile = path.join(tmpQ, 'config.json')
+  const r1 = rememberConfig({ registries: ['X:/regs'], libraries: { filmmeasure: kbQ }, advice: { longSection: 300 }, 内部字段: 1 }, { file: cfgFile })
+  const cfgSaved = JSON.parse(fs.readFileSync(cfgFile, 'utf8'))
+  ok('rememberConfig 落盘只抄白名单字段', r1.written === true && cfgSaved.libraries && !('内部字段' in cfgSaved), JSON.stringify(cfgSaved))
+  ok('rememberConfig 内容没变时不再重写', rememberConfig({ libraries: { filmmeasure: kbQ }, advice: { longSection: 300 }, registries: ['X:/regs'] }, { file: cfgFile }).written === false, '')
+  ok('loadConfig 读得回、坏文件回空对象', loadConfig({ file: cfgFile }).libraries.filmmeasure === kbQ && Object.keys(loadConfig({ file: path.join(tmpQ, 'nope.json') })).length === 0, '')
+  fs.writeFileSync(path.join(tmpQ, 'bom.json'), '\uFEFF{"libraries":{"x":"y"}}', 'utf8')
+  ok('loadConfig 能吃带 BOM 的配置（PowerShell 写出来的都带）', loadConfig({ file: path.join(tmpQ, 'bom.json') }).libraries.x === 'y', '')
+  const rowsQ = listLibraries({ workspace: tmpQ, config: { libraries: { filmmeasure: kbQ } }, includeHidden: true })
+  ok(
+    '配置里把 .nodekb 本身写进 libraries 也认（不必恰好写技能目录）',
+    rowsQ.some((r) => r.exists && (r.name === 'filmmeasure' || (r.aliases || []).includes('filmmeasure'))),
+    rowsQ.map((r) => `${r.name}:${r.exists}`).join(','),
+  )
+
+  const runQ = (args) => {
+    try {
+      return { code: 0, out: execFileSync(process.execPath, [path.join(root, 'bin/nodekb.mjs'), ...args], { cwd: tmpQ, encoding: 'utf8', env: { ...process.env, NODEKB_CONFIG: cfgFile } }) }
+    } catch (e) {
+      return { code: e.status == null ? -1 : e.status, out: String(e.stdout || '') + String(e.stderr || '') }
+    }
+  }
+  const cliNamed = runQ(['diag', '--kb', 'filmmeasure', '--json'])
+  let namedJson = null
+  try {
+    namedJson = JSON.parse(cliNamed.out)
+  } catch {
+    namedJson = null
+  }
+  ok('CLI 认插件配置里的注册名（与工具层同名）', !!namedJson && typeof namedJson.exit_code === 'number', cliNamed.out.slice(0, 100))
+  ok('CLI diag 现在会算 advice（不再恒为 0）', !!namedJson && Array.isArray(namedJson.advice) && namedJson.advice.length > 0, cliNamed.out.slice(0, 120))
+  ok('CLI diag 的 advice 也吃配置阈值', runQ(['diag', '--kb', 'filmmeasure']).out.includes('advice 1') || /advice [1-9]/.test(runQ(['diag', '--kb', 'filmmeasure']).out), '')
+
+  fs.rmSync(tmpQ, { recursive: true, force: true })
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────

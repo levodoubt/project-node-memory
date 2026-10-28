@@ -14,6 +14,10 @@
 | `nodekb vcs [status\|log] [--count N]` | 快照历史（只读） |
 
 - 库定位：`--kb <库名|库目录|任意目录>`；省略时用当前目录的 `.nodekb`。命令行里**显式给路径**就是授权，所以不像工具层那样受工作区白名单限制；按名字找库时才用当前目录的发现结果。
+- **库名与工具层一致（1.5.15 起）**：插件在宿主里启动时把生效配置抄到 `~/.dsh/nodekb/config.json`（只抄 `registries` / `libraries` / `workspace` / `exclude` / `advice`），命令行读它——于是工具层认的 `kb="filmmeasure"`，`nodekb diag --kb filmmeasure` 也认，不必每次手写绝对路径。`NODEKB_CONFIG=<文件>` 可指定另一份；`libraries` 里写技能目录或 `.nodekb` 本身都行。宿主没启动过（没这份文件）时，命令行仍能按当前目录发现库、按路径打开。
+- `--toc` 默认只往下展开两层（`--depth N` 调，`0` = 只列目标节点本身）；目录是定位用的，整支递归在大库上一次就是上千 token。
+- `--diag` 会把 advice 一起算出来（阈值/开关来自配置里的 `advice`）。
 - 每个读命令都支持 `--json`，字段与工具层 `format: "json"` 一致（`{tid, source, lines, chars, hits, …}` / diag 的 `{errors, warnings, advice, exit_code}`），脚本里直接 `JSON.parse` 判分支。
+- Windows 上别用管道接中文 JSON（PowerShell 按 CP936 收 UTF-8 会 `ArgumentException`）：`--out 结果.json` 直接落文件，回执给相对路径与字符数。
 - 退出码：`0` 成功 / `1` 无命中或无变更 / `2` 参数错或自检有 error。
 - 批量改名的计划文件：`[{target, new_name}]` 或 `{"renames":[…]}`（也接受 `[["doc/a.md","b"]]`）；逐条重读库、中途失败即停，回执里写明前几条已落盘。**先跑 `--dry-run` 看一眼会改哪些引用。**

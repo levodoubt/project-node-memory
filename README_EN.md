@@ -68,7 +68,7 @@ All optional, under `config:` on the plugin's row in `cordis.patch.yml`:
 | `prompt.enabled` | `true` | Register the system-prompt section |
 | `skill.enabled` | `true` | Register the bundled skill with the host `skills` service |
 | `git` | `true` | Embedded git snapshots: auto-commit after each `kb_write`; set `false` to disable |
-| `advice` | `{ minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | Thresholds and cap for the `advice` tier of `kb_diag` |
+| `advice` | `{ display: true, minFragNodes: 10, fragChars: 500, longSection: 10000, maxItems: 5 }` | The `advice` tier of `kb_diag`: `display: false` drops it entirely, `limit` caps the count (`0` = no cap), the rest are thresholds |
 
 `exclude` defaults to `tmp`, `tmp_*`, `temp*`, `.tmp*`, `*_probe`, `nodekb_lab`, `__pycache__`, `_release_assets`, `venv`. A `.nodekb` inside a scratch or probe directory is usually leftover from an experiment; listing it only clutters the selector. Use `"!tmp_keep"` to force one back in, and plain names to add more:
 
@@ -96,7 +96,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | Tool | What it does |
 |---|---|
 | `kb_list` | Which libraries exist (absolute paths and origins) plus the workspace this call resolved to. Call this first when unsure what `kb` to pass |
-| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen`; plus `offset` / `limit` (line window) and `find` (matching lines only, with file line numbers) |
+| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen`; `toc` expands two levels by default (`depth` tunable, `0` = this node only); plus `offset` / `limit` (line window) and `find` (matching lines only, with file line numbers) |
 | `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet; `lines: true` adds up to 3 line hits per node |
 | `kb_diag` | Structure self-check in three tiers: `errors` / `warnings` / `advice`; `advice` is "could be leaner" guidance and never affects the exit code |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
@@ -113,6 +113,8 @@ The read-side tools (`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_
 - `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles, unclosed `<node>` / `<tscl>`: the structure is broken, must fix.
 - `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes, **TID-shaped text in prose or inline code that does not resolve** (`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`), **non-lowercase TIDs** (`→ 应写「doc:01-real」`), and **any breach of the library's own `rules.json`** (see below): fix as needed.
 - `advice` — **written correctly but could be leaner**, five kinds: ≥10 Markdown files under one parent whose **whole text** is under 500 chars (counted as preamble + all `##` sections + `<node>` bodies, so "one file per chapter" is never misjudged as fragmentary), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters (its `fix` notes that splitting a section shifts positional TIDs). Every item carries a `fix` and **never affects `exit_code`**, so CI can ignore it.
+
+`advice` is tunable too (1.5.15): `advice: { display: false }` drops the tier (a deliberately loose library only gets distracted by it), `advice: { limit: 10 }` caps the count (`0` = everything), `advice: { maxItems: 10 }` changes the default cap; to mute single items add a fourth group to `diag_ignore.json`, `advice: [{code, tid}]` (`code` and `tid` are regexes that must **both** match).
 
 A `##` section's parent is **always the file node**: "organise by `##`" and named `<node>` anchors can coexist in one file, and the TOC lists them as siblings instead of chaining `3.1 → lesson1 → 3.2`.
 
@@ -145,6 +147,7 @@ nodekb list --all
 nodekb read doc:03-semantics --kb about-node-memory --find 行号
 nodekb search "regression gate" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # exit code 0/2, easy to branch on
+nodekb diag --kb F:/proj --json --out out.json   # Windows pipes mangle Chinese; write a file instead
 nodekb write doc:05-x --kb F:/proj --file new-body.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
 nodekb rename --batch plan.json --kb F:/proj --dry-run   # batch rename: re-reads the library per item, stops on first failure
@@ -152,6 +155,7 @@ nodekb vcs log --kb F:/proj --count 5
 ```
 
 - Library resolution: `--kb <name|library dir|any dir>`; defaults to `.nodekb` in the current directory. On the command line an explicit path *is* the authorisation, so the workspace allow-list does not apply (it only matters when a library is looked up by name).
+- **Names mean the same thing on both sides** (1.5.15): at startup the plugin snapshots its effective config (`registries` / `libraries` / `workspace` / `exclude` / `advice`) into `~/.dsh/nodekb/config.json`, and the CLI resolves names from it — the `kb="filmmeasure"` the tools accept is the `--kb filmmeasure` the CLI accepts, and `config.libraries` may point at either the skill directory or the `.nodekb` itself.
 - Every command takes `--json`, with the same shape as the tools' `format: "json"`; read commands exit `0` on success, `1` when nothing matched, `2` on bad arguments or when the self-check finds errors.
 - Tools and CLI share **one engine** (`lib/engine/*`), so there is no second set of rules; `import … from 'project-node-memory/engine/mdlib.js'` gives the parser directly instead of importing source files by absolute path.
 
