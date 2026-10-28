@@ -35,7 +35,7 @@ Agent 默认靠 `read` / `grep` / `glob` 找东西，代价是**试探**：grep 
    `kb_write` 写前校验 TID / `<node>` 独占一行 / 路径不越界，写后立刻跑 diag 把悬空引用与重复块报回来。`write` 没有任何一层会拦，所以规则只能靠记。
 
 4. **随包技能 `project-node-memory-guide`（按需加载）** 
-   提示词段落只有五行，写法规程（文件怎么分、TID 怎么起、先读什么再写什么、三个反例）放在 `skills/project-node-memory-guide/SKILL.md`。 
+   提示词段落只有五行，写法规程（文件怎么分、TID 怎么起、先读什么再写什么、三个反例）放在 `skills/project-node-memory-guide/SKILL.md`——它只留每次都要用的那一小撮（约 5 K 字符），明细在同目录的 `references/`（`syntax` / `write` / `diag` / `cli` / `rules` 五份）**按需读**。注册时带 `resourceBase: { kind: "directory", path }`，模型才能按相对路径打开它们（不带的话宿主只会说「资源由 provider 管理」，相对路径无从解析）。 
    装好即生效，**不需要任何手工步骤**：宿主 `skills` 服务可用时插件用 `ctx.skills.register()` 把正文注册在内存里（不用时零提示词开销，禁用插件即撤回）。`skill.enabled=false` 可关；`GET /nodekb/api/skill` 自证是否注册成功。
 
    > 注：DSH 的 skill 文件发现只扫 `$DSH_HOME/skills`、`<workspace>/.dsh/skills` 与 preset 里显式声明的路径，**不会**去扫 npm 包内的 `skills/` 目录。所以「把 SKILL.md 打进包」本身不会让它被发现——要么注册进内存（本插件的做法），要么启动时把文件写进用户的 skill 根目录（会在家目录留残留）。

@@ -945,6 +945,15 @@ section('建库与写库')
     ok('技能带非空 description 与正文', !!got && got.description.length > 10 && got.content.length > 400, got && got.content.length)
     ok('技能带 source（注册表加载时会校验）', !!got && got.source === 'project-node-memory')
     ok('技能可被模型与用户调用', !!got && got.invocation.modelInvocable === true && got.invocation.userInvocable === true)
+    ok(
+      '技能带 resourceBase 目录（模型才能按相对路径读 references/）',
+      !!got && !!got.resourceBase && got.resourceBase.kind === 'directory' && /skills\/project-node-memory-guide$/.test(got.resourceBase.path.replace(/\\/g, '/')),
+      got && JSON.stringify(got.resourceBase),
+    )
+    // 用配置里的 text 覆盖时不带 resourceBase（那会指向一个和正文对不上的目录）
+    let gotText = null
+    skillMod.registerSkill({ skills: { register: (s) => { gotText = s; return () => {} } } }, { skill: { text: '---\nname: x\n---\n正文' } })
+    ok('skill.text 覆盖时不带 resourceBase', !!gotText && gotText.resourceBase === undefined, gotText && JSON.stringify(gotText.resourceBase))
     ok('状态自证 registered', skillMod.skillState().registered === true && skillMod.skillState().reason === 'ok')
     d()
     ok('disposer 撤掉注册', skillMod.skillState().registered === false && got === null)
@@ -2401,6 +2410,28 @@ section('tscl 定义与双语法')
   ok('中途失败前的改名已落盘且被回执列出', fs.existsSync(path.join(kbP, 'doc/a9.md')), fs.readdirSync(path.join(kbP, 'doc')).join(','))
 
   fs.rmSync(tmpP, { recursive: true, force: true })
+}
+
+// ── 21. 技能文档预算（1.5.14：SKILL.md 精简 + references/ 渐进式） ──────────
+{
+  section('技能文档预算')
+  const skillDir = path.join(root, 'skills/project-node-memory-guide')
+  const skillPath = path.join(skillDir, 'SKILL.md')
+  const skillSrc = fs.readFileSync(skillPath, 'utf8')
+  const refDir = path.join(skillDir, 'references')
+  const refFiles = fs.existsSync(refDir) ? fs.readdirSync(refDir).filter((f) => f.endsWith('.md')).sort() : []
+
+  ok('SKILL.md 有字数预算（≤ 6000 字符）', skillSrc.length <= 6000, `${skillSrc.length} 字符`)
+  ok('references/ 里至少有 4 份明细', refFiles.length >= 4, refFiles.join(','))
+  const mentioned = [...skillSrc.matchAll(/references\/([A-Za-z0-9._-]+\.md)/g)].map((m) => m[1])
+  ok('SKILL.md 提到的每份 references 都存在', mentioned.length > 0 && mentioned.every((f) => refFiles.includes(f)), mentioned.join(','))
+  ok('references/ 里每份都被 SKILL.md 索引到', refFiles.every((f) => mentioned.includes(f)), refFiles.filter((f) => !mentioned.includes(f)).join(','))
+  const bigRef = refFiles.filter((f) => fs.readFileSync(path.join(refDir, f), 'utf8').length > 8000)
+  ok('单份明细不超过 8000 字符', bigRef.length === 0, bigRef.join(','))
+  ok('大段实现细节已移出 SKILL.md', !/边界规则与实现细节/.test(skillSrc))
+  ok('package.json 的 files 收进 skills（references 会随包发出）', Array.isArray(pkg.files) && pkg.files.includes('skills'), JSON.stringify(pkg.files))
+  const refChars = refFiles.reduce((n, f) => n + fs.readFileSync(path.join(refDir, f), 'utf8').length, 0)
+  console.log(`      SKILL.md ${skillSrc.length} 字符 + references ${refFiles.length} 份共 ${refChars} 字符（按需加载）`)
 }
 
 // ── 汇总 ──────────────────────────────────────────────────────────────────
