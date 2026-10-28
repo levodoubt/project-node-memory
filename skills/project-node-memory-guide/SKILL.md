@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.15
+version: 1.5.16
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -27,8 +27,8 @@ kb_search query=...         # toc 里找不到再搜
 ```
 
 - **不要**一次把整库读进上下文；写之前先确认这个结论是不是已经写在别处了。
-- 节点太大就按行开窗：`kb_read target=<TID> mode=node offset=41 limit=60`、`kb_read target=<TID> find=关键词`、`kb_search query=... lines=true`。超 `maxlen` 会截断并给续读坐标，不报错。
-- `kb_read mode=toc` 默认只展开两层（`depth` 可调，`0` = 只看本节点），大库的目录不再一次上千 token。
+- 节点太大就按行开窗：`kb_read target=<TID> mode=node offset=41 limit=60`、`kb_read target=<TID> find=关键词`（整串没中会按词退让）、`kb_search query=... lines=true`。超 `maxlen` 会截断并给续读坐标，不报错。
+- `kb_read mode=toc` 默认只展开两层（`depth` 可调，`0` = 只看本节点），大库的目录不再一次上千 token；有子节的节点报「整支 N 字符」，目录节点自身 0 字符，靠这个数判断值不值得进去。
 - 要按字段判断就传 `format: "json"`（`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_diag`）：给结构化结果，省得正则切片散文；`kb_diag` 在 json 模式下不抛异常，看 `exit_code`。
 - `kb_search` 是**词面**检索（中文 2-gram、英文切词）：搜关键词更有效。命中里 `tid` 是稳定句柄，`ref` 才是真正命中的节点，两者对不上按 `ref` 定位。片段里的 `[[tscl="x"]]` 已嵌成值。
 - 行号只是**同一次解析快照内的临时坐标**；写进文档的引用一律用 TID。

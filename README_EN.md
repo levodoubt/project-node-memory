@@ -96,7 +96,7 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | Tool | What it does |
 |---|---|
 | `kb_list` | Which libraries exist (absolute paths and origins) plus the workspace this call resolved to. Call this first when unsure what `kb` to pass |
-| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen`; `toc` expands two levels by default (`depth` tunable, `0` = this node only); plus `offset` / `limit` (line window) and `find` (matching lines only, with file line numbers) |
+| `kb_read` | `target` + `mode` (`subtree` default / `node` / `toc` / `raw`) + `maxlen`; `toc` expands two levels by default (`depth` tunable, `0` = this node only) and reports "whole subtree N chars" for nodes with children; plus `offset` / `limit` (line window) and `find` (matching lines only, with file line numbers; falls back to word-level matching when the exact phrase misses) |
 | `kb_search` | CJK-friendly retrieval (2-gram index + multi-term weighting + substring fallback), returns stable TID, type, source line, snippet; `lines: true` adds up to 3 line hits per node |
 | `kb_diag` | Structure self-check in three tiers: `errors` / `warnings` / `advice`; `advice` is "could be leaner" guidance and never affects the exit code |
 | `kb_backlinks` | Who references this node. Run before renaming a TID or deleting a node |
@@ -147,7 +147,7 @@ nodekb list --all
 nodekb read doc:03-semantics --kb about-node-memory --find 行号
 nodekb search "regression gate" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # exit code 0/2, easy to branch on
-nodekb diag --kb F:/proj --json --out out.json   # Windows pipes mangle Chinese; write a file instead
+nodekb diag --kb F:/proj --out out.json  # a .json suffix implies --json; Windows pipes mangle Chinese, so write a file
 nodekb write doc:05-x --kb F:/proj --file new-body.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
 nodekb rename --batch plan.json --kb F:/proj --dry-run   # batch rename: re-reads the library per item, stops on first failure
@@ -156,7 +156,7 @@ nodekb vcs log --kb F:/proj --count 5
 
 - Library resolution: `--kb <name|library dir|any dir>`; defaults to `.nodekb` in the current directory. On the command line an explicit path *is* the authorisation, so the workspace allow-list does not apply (it only matters when a library is looked up by name).
 - **Names mean the same thing on both sides** (1.5.15): at startup the plugin snapshots its effective config (`registries` / `libraries` / `workspace` / `exclude` / `advice`) into `~/.dsh/nodekb/config.json`, and the CLI resolves names from it — the `kb="filmmeasure"` the tools accept is the `--kb filmmeasure` the CLI accepts, and `config.libraries` may point at either the skill directory or the `.nodekb` itself.
-- Every command takes `--json`, with the same shape as the tools' `format: "json"`; read commands exit `0` on success, `1` when nothing matched, `2` on bad arguments or when the self-check finds errors.
+- Every command takes `--json`, with the same shape as the tools' `format: "json"`; `--out name.json` implies it from the suffix. `nodekb diag` is the same shape as `kb_diag`: it computes advice and emits the one-off `plugin-updated` entry after an upgrade. Read commands exit `0` on success, `1` when nothing matched, `2` on bad arguments or when the self-check finds errors.
 - Tools and CLI share **one engine** (`lib/engine/*`), so there is no second set of rules; `import … from 'project-node-memory/engine/mdlib.js'` gives the parser directly instead of importing source files by absolute path.
 
 ## How a library is located

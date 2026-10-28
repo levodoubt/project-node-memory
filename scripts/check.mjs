@@ -2571,6 +2571,89 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpQ, { recursive: true, force: true })
 }
 
+// ── 23. 两层输出同构 / 目录下沉量 / find 退让（1.5.16）───────────────────────
+{
+  const { parse_library: parseR3 } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { cmdRead: readR3 } = await import(url(path.join(root, 'lib/engine/commands.js')))
+  const tmpR = path.join(root, '.tmp-r16')
+  fs.rmSync(tmpR, { recursive: true, force: true })
+  const kbR = path.join(tmpR, '.nodekb')
+  fs.mkdirSync(path.join(kbR, 'doc'), { recursive: true })
+  const fill = (n) => 'x'.repeat(n)
+  fs.writeFileSync(
+    path.join(kbR, 'doc', 'big.md'),
+    `# 大文件\n\n前 ${fill(100)}\n\n## 1. 甲\n\n${fill(200)}\n\n## 2. 乙\n\n${fill(50)}\n`,
+    'utf8',
+  )
+  fs.writeFileSync(
+    path.join(kbR, 'doc', 'fres.md'),
+    '# 折射\n\nFresnel reflection coefficient 按角度变化，再乘一次 Fresnel 衰减。\n',
+    'utf8',
+  )
+  const nodesR = parseR3(kbR, [])
+  const fileTid = [...nodesR.values()].find((n) => n.source && String(n.source).replace(/#L.*$/, '').endsWith('doc/big.md')).tid
+  const tocR = readR3(nodesR, fileTid, { toc: true }).text
+  const kids = [...nodesR.values()].filter((n) => n.parent_tid === fileTid)
+  const kidSum = kids.reduce((s, n) => s + n.content.length, 0)
+  const ownLen = nodesR.get(fileTid).content.length
+  ok('toc 头部给出「整支」字符量', /整支 \d+ 字符/.test(tocR), tocR.split('\n')[0])
+  ok(
+    '「整支」= 自身正文 + 各子节正文',
+    Number(/(?:整支 )(\d+) 字符/.exec(tocR)?.[1] || -1) === ownLen + kidSum,
+    `整支=${/(?:整支 )(\d+) 字符/.exec(tocR)?.[1]} own=${ownLen} kids=${kidSum}`,
+  )
+  ok('没有子节的节点不硬加「整支」', !/· Fresnel[^\n]*整支/.test(tocR), '')
+
+  const fresTid = [...nodesR.values()].find((n) => n.source && String(n.source).replace(/#L.*$/, '').endsWith('doc/fres.md')).tid
+  const exact = readR3(nodesR, fresTid, { find: 'Fresnel reflection coefficient' })
+  const loose = readR3(nodesR, fresTid, { find: 'Fresnel coefficient' })
+  const miss = readR3(nodesR, fresTid, { find: 'Fresnel 折射率' })
+  ok('find 精确子串仍优先（不退让）', exact.code === 0 && !exact.loose, String(exact.code))
+  ok('find 子串没中时按词退让（每个词都要出现、不限顺序）', loose.code === 0 && loose.loose === true, loose.text.slice(0, 120))
+  ok('find 退让后仍不中才报未命中', miss.code === 1 && /未命中/.test(miss.text), miss.text.slice(0, 80))
+  ok('退让命中时回执说明用了哪几个词', loose.text.includes('Fresnel + coefficient'), loose.text.split('\n')[0])
+
+  const runR = (args) => {
+    try {
+      return execFileSync(process.execPath, [path.join(root, 'bin/nodekb.mjs'), ...args], { cwd: tmpR, encoding: 'utf8' })
+    } catch (e) {
+      return String(e.stdout || '') + String(e.stderr || '')
+    }
+  }
+  fs.rmSync(path.join(kbR, '.plugin-state.json'), { force: true })
+  const d1 = runR(['diag', '--kb', kbR, '--json'])
+  fs.rmSync(path.join(kbR, '.plugin-state.json'), { force: true })
+  const d2 = runR(['diag', '--kb', kbR, '--json'])
+  let j1 = null
+  try {
+    j1 = JSON.parse(d1)
+  } catch {
+    j1 = null
+  }
+  ok('命令行 diag 也带 plugin-updated（与 kb_diag 同构）', !!j1 && (j1.advice || []).some((a) => a.code === 'plugin-updated'), d1.slice(0, 120))
+  const d3 = runR(['diag', '--kb', kbR, '--json'])
+  let j3 = null
+  try {
+    j3 = JSON.parse(d3)
+  } catch {
+    j3 = null
+  }
+  ok('plugin-updated 是一次性的（第二次不再出现）', !!j3 && !(j3.advice || []).some((a) => a.code === 'plugin-updated'), d3.slice(0, 120))
+
+  const outJson = path.join(tmpR, 'diag.json')
+  runR(['diag', '--kb', kbR, '--out', outJson])
+  let parsedOut = null
+  try {
+    parsedOut = JSON.parse(fs.readFileSync(outJson, 'utf8'))
+  } catch {
+    parsedOut = null
+  }
+  ok('--out 以 .json 结尾时自动结构化（不必再补 --json）', !!parsedOut && typeof parsedOut.exit_code === 'number', String(parsedOut).slice(0, 80))
+  ok('d2 也带 plugin-updated 之外的有效内容', !!d2 && d2.length > 0, '')
+
+  fs.rmSync(tmpR, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言

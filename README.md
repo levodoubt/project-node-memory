@@ -96,7 +96,7 @@ config:
 | 工具            | 干什么                                                                                                                                       |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kb_list`       | 有哪些库（含绝对路径与来源）、本会话判定的工作区。不确定传什么 `kb` 时先调它                                                                 |
-| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`；`toc` 默认只展开两层（`depth` 可调，`0` = 只看本节点）；另有 `offset` / `limit`（行窗）与 `find`（只回命中行，带文件行号） |
+| `kb_read`       | `target` + `mode`（`subtree` 默认 / `node` / `toc` / `raw`）+ `maxlen`；`toc` 默认只展开两层（`depth` 可调，`0` = 只看本节点），有子节的节点会报「整支 N 字符」；另有 `offset` / `limit`（行窗）与 `find`（只回命中行，带文件行号；整串没中时按词退让） |
 | `kb_search`     | 中文友好检索（2-gram + 多词加权 + 少见时退化子串），返回稳定 TID、类型、源行、片段；`lines: true` 再加每节点 ≤3 条行级命中                |
 | `kb_diag`       | 结构自检：`errors` / `warnings` / `advice` 三档；`advice` 是「还能更省」的改进建议，不影响退出码                                             |
 | `kb_backlinks`  | 谁引用了它。改 TID / 删节点前先跑                                                                                                            |
@@ -147,7 +147,7 @@ nodekb list --all
 nodekb read doc:03-semantics --kb about-node-memory --find 行号
 nodekb search "回归闸门" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # 退出码 0/2，脚本里直接判
-nodekb diag --kb F:/proj --json --out out.json   # Windows 管道会坏中文，落文件最省事
+nodekb diag --kb F:/proj --out out.json  # .json 后缀自动当 --json；Windows 管道会坏中文，落文件最省事
 nodekb write doc:05-x --kb F:/proj --file 新正文.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
 nodekb rename --batch 计划.json --kb F:/proj --dry-run   # 批量改名，逐条重读库、中途失败即停
@@ -156,7 +156,7 @@ nodekb vcs log --kb F:/proj --count 5
 
 - 库定位：`--kb <库名|库目录|任意目录>`，省略时用当前目录的 `.nodekb`。命令行里显式给路径即授权，不受工作区白名单限制。
 - **库名两边一致**（1.5.15）：插件启动时会把生效配置（`registries` / `libraries` / `workspace` / `exclude` / `advice`）抄到 `~/.dsh/nodekb/config.json`，命令行据此算名字——工具层认的 `kb="filmmeasure"`，命令行 `--kb filmmeasure` 同样认；`config.libraries` 里写技能目录或 `.nodekb` 本身都能定位。
-- 每个命令都支持 `--json`，字段与工具层 `format: "json"` 一致；读命令退出码 `0` 成功、`1` 无命中、`2` 参数错或自检有 error。
+- 每个命令都支持 `--json`，字段与工具层 `format: "json"` 一致；`--out 名字.json` 按后缀自动结构化。`nodekb diag` 与 `kb_diag` 同构：同样算 advice、同样在升级后给一次性的 `plugin-updated`。读命令退出码 `0` 成功、`1` 无命中、`2` 参数错或自检有 error。
 - 工具层与命令行**共用同一份引擎**（`lib/engine/*`），没有第二套判定逻辑；`require('project-node-memory/engine')` 或 `import … from 'project-node-memory/engine/mdlib.js'` 可直接拿解析器，不必再按绝对路径 import 源码。
 
 ## 库怎么定位

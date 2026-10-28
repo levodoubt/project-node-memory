@@ -94,7 +94,11 @@ function readCase(name, target, opts = {}, pyArgs) {
   const pyToc = py(['read', 'doc:index', '--toc']).replace(/\s+$/, '')
   const jsToc = cmdRead(nodes, 'doc:index', { toc: true }).text
   const flatten = (s) => s.replace(/\n +- note:inline/g, '\n  - note:inline')
-  check('read doc:index toc', flatten(pyToc), flatten(jsToc))
+  // 1.5.16 起 toc 头部对「有子节的节点」多报一个「整支 N 字符」；子节集合本身受上面的
+  // 缺省 parent 分叉影响，所以这一项只比结构、不比整支量（整支量由 scripts/check.mjs 断言）。
+  const stripWhole = (s) => flatten(s).replace(/ · 整支 \d+ 字符/g, '')
+  check('read doc:index toc', stripWhole(pyToc), stripWhole(jsToc))
+  check('toc 头部用「整支」报下沉量（JS 侧）', true, /- doc:index · .*整支 \d+ 字符/.test(jsToc))
   check('缺省 parent 分叉：Python 把 inline 链在 explicit 下', true, /\n {4}- note:inline/.test(pyToc))
   check(
     '缺省 parent 分叉：JS 让 inline 与 explicit 并列',
