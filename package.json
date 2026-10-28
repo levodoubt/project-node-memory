@@ -1,8 +1,11 @@
 {
   "name": "project-node-memory",
-  "version": "1.5.11",
+  "version": "1.5.12",
   "description": "Project node knowledge base for DSH agents: markdown-as-database, stable TIDs, transclusion projection, structure self-check.",
   "type": "module",
+  "bin": {
+    "nodekb": "./bin/nodekb.mjs"
+  },
   "license": "MIT",
   "author": "levodoubt",
   "repository": {
@@ -30,9 +33,17 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./engine": {
+      "default": "./lib/engine/mdlib.js"
+    },
+    "./engine/*": "./lib/engine/*",
+    "./cli": {
+      "default": "./lib/cli.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
+    "bin",
     "lib",
     "skills",
     "cordis.patch.yml",

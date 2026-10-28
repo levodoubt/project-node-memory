@@ -2197,6 +2197,117 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpJ, { recursive: true, force: true })
 }
 
+// ── 19. 1.5.12：反引号里的失效 TID / nodekb CLI / format=json ──────────────
+{
+  section('反引号 TID 核对、nodekb CLI、工具 format=json（1.5.12）')
+  const tmpK = path.join(root, '.tmp-1512')
+  fs.rmSync(tmpK, { recursive: true, force: true })
+  const kbK = path.join(tmpK, '.nodekb')
+  fs.mkdirSync(path.join(kbK, 'doc'), { recursive: true })
+  const bodyK = [
+    '# 引用探针', // 1
+    '', // 2
+    '## 1. 正文里的 TID 文本', // 3
+    '', // 4
+    '- 有效：`doc:01-real` 能解析，不报。', // 5
+    '- 失效：`doc:01-gone` 要报出来。', // 6
+    '- 路径样子：`doc/03-build.md` 不是 TID。', // 7
+    '- 别的命名空间：`foo:bar` 不是本库的。', // 8
+    '- 占位符：`doc:x` 是教学写法。', // 9
+    '- 反例：× `doc:02-nope` 也是教学写法。', // 10
+    '- 对照示例：`doc/09-eg.md` → `doc:09-eg`（路径对照，不报）。', // 11
+    '- 大小写：`doc:01-REAL` 应提示小写。', // 12
+    '- 定义 id：`fact:k` 能解析。', // 12
+    '', // 13
+    '~~~md', // 14
+    '`doc:01-infence` 在围栏里，不算。', // 15
+    '~~~', // 16
+    '', // 17
+    '## 2. 反向引用', // 18
+    '', // 19
+    '- 定义：<tscl id="fact:k">7</tscl> 展开成 [[tscl="fact:k"]]。', // 20
+    '', // 21
+  ].join('\n')
+  fs.writeFileSync(path.join(kbK, 'doc/01-real.md'), bodyK, 'utf8')
+  fs.writeFileSync(
+    path.join(kbK, 'diag_ignore.json'),
+    JSON.stringify({ blocks: [], lines: [], tids: ['^doc:01-ignored$'] }),
+    'utf8',
+  )
+
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const nodesK = parse_library(kbK, [])
+  const defsK = collectDefs(nodesK).defs
+  const diagK = diag(nodesK, { problems: [], libRoot: kbK, defs: defsK })
+  const warnsK = diagK.report.warnings.join('\n')
+  ok('反引号里的失效 TID 被报出来', /doc:01-gone/.test(warnsK) && /不可解析的 TID 文本/.test(warnsK), warnsK.split('\n')[0])
+  ok('能解析的 TID 不报', !/不可解析的 TID 文本[^\n]*「doc:01-real」/.test(warnsK), warnsK)
+  ok('路径样子不算 TID', !/03-build/.test(warnsK), warnsK)
+  ok('别的命名空间不报', !/foo:bar/.test(warnsK), warnsK)
+  ok('占位符与 × 反例不报', !/「doc:x」/.test(warnsK) && !/「doc:02-nope」/.test(warnsK), warnsK)
+  ok('TID 文本警告按文件行号报', /文件第 6 行「doc:01-gone」/.test(warnsK), warnsK.split('\n')[0])
+  ok('大小写不匹配给「应写」提示', /TID 大小写不合规/.test(warnsK) && /doc:01-real/.test(warnsK), warnsK.split('\n').find((l) => /大小写/.test(l)) || '')
+  ok('围栏里的 TID 文本不算', !/infence/.test(warnsK), warnsK)
+  ok('路径对照示例不报', !/「doc:09-eg」/.test(warnsK), warnsK)
+  ok('失效 TID 给最接近的候选', /最接近/.test(warnsK), warnsK.split('\n').find((l) => /最接近/.test(l)) || '')
+  ok('diag_ignore 的 tids 能压掉这条警告', !/01-ignored/.test(warnsK), warnsK)
+  ok('这类问题只算 warning（不是 error）', diagK.report.errors.length === 0, JSON.stringify(diagK.report.errors))
+
+  // CLI：diag / read / search / list，退出码与 JSON 都可被脚本消费
+  const cli = path.join(root, 'bin/nodekb.mjs')
+  const run = (args) => {
+    try {
+      return { code: 0, out: execFileSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8' }) }
+    } catch (e) {
+      return { code: e.status == null ? -1 : e.status, out: String(e.stdout || '') + String(e.stderr || '') }
+    }
+  }
+  const cliDiag = run(['diag', '--kb', kbK, '--json'])
+  let cliJson = null
+  try {
+    cliJson = JSON.parse(cliDiag.out)
+  } catch {
+    cliJson = null
+  }
+  ok('CLI diag --json 输出可解析的 JSON', !!cliJson && typeof cliJson.exit_code === 'number', cliDiag.out.slice(0, 80))
+  ok('CLI diag 的退出码与 report.exit_code 一致', !!cliJson && cliDiag.code === cliJson.exit_code, `${cliDiag.code} vs ${cliJson && cliJson.exit_code}`)
+  ok('CLI 接受库目录路径（含 .nodekb 的上级）', /节点 \d+ · 定义 \d+/.test(run(['diag', '--kb', tmpK]).out), run(['diag', '--kb', tmpK]).out.split('\n')[1] || '')
+  const cliRead = run(['read', 'doc:01-real', '--kb', kbK, '--find', '失效'])
+  ok('CLI read --find 给文件行号', /doc\/01-real\.md#L6/.test(cliRead.out), cliRead.out.slice(0, 120))
+  const cliSearch = run(['search', '失效', '--kb', kbK, '--json', '--lines'])
+  let searchJson = null
+  try {
+    searchJson = JSON.parse(cliSearch.out)
+  } catch {
+    searchJson = null
+  }
+  ok('CLI search --json --lines 带行级命中', !!searchJson && JSON.stringify(searchJson).includes('"line"'), cliSearch.out.slice(0, 100))
+  ok('CLI list --kb 认路径并报节点数', /节点 \/ \d+ 定义/.test(run(['list', '--kb', kbK]).out), run(['list', '--kb', kbK]).out.trim())
+  ok('CLI 名字找不到时报出可用库', /未注册的库/.test(run(['read', 'doc:x', '--kb', 'no-such-lib-xyz']).out), '')
+
+  // format=json：工具层把结构化字段原样给出，kb_diag 也不再抛异常
+  const regK = new Map()
+  const ctxK = {
+    tools: { register: (t) => { regK.set(t.name, t); return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-k' ? { header: { cwd: tmpK } } : null) } : null),
+  }
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  buildTools(ctxK, { git: false })
+  const execK = { agent: { id: 's-k' } }
+  const readJ = await regK.get('kb_read').execute({ target: 'doc:01-real', mode: 'node', offset: 1, limit: 2, format: 'json' }, execK)
+  const readRendered = regK.get('kb_read').output.render({ format: 'json' }, readJ)[0].text
+  const readJson = JSON.parse(readRendered)
+  ok('format=json 回结构化字段（含行号与窗口）', readJson.tid === 'doc:01-real' && typeof readJson.chars === 'number', readRendered.slice(0, 120))
+  ok('format=json 不带散文 text 字段', !('text' in readJson), Object.keys(readJson).join(','))
+  const diagJsonTool = await regK.get('kb_diag').execute({ kb: tmpK, format: 'json' }, execK)
+  ok('kb_diag format=json 不抛异常，改由 exit_code 表达', typeof diagJsonTool.exit_code === 'number', JSON.stringify(diagJsonTool).slice(0, 80))
+
+  fs.rmSync(tmpK, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言

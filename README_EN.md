@@ -106,10 +106,12 @@ The right column renders at most 10,000 characters per view (with a truncation n
 | `kb_rename` | Rename a file and rewrite every reference pointing at it; re-reads before writing, so concurrent edits are never clobbered |
 | `kb_vcs_status` | Recent snapshots + uncommitted changes of the library's embedded git repo (`count` defaults to 5); `kb_write` / `kb_rename` snapshot automatically, `git: false` turns it off; explains itself when git is missing |
 
+The read-side tools (`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_diag`) all take `format: "json"`: they hand back the structured fields they already computed (`tid/source/lines/chars/hits`, and `{errors, warnings, advice, exit_code}` for diag) instead of prose the agent would have to slice again; in json mode `kb_diag` does not throw — success is whatever `exit_code` says.
+
 ### The three tiers of `kb_diag`
 
-- `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles: the structure is broken, must fix.
-- `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes: fix as needed.
+- `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles, unclosed `<node>` / `<tscl>`: the structure is broken, must fix.
+- `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes, and **TID-shaped text in prose or inline code that does not resolve** (`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`) plus **non-lowercase TIDs** (`→ 应写「doc:01-real」`): fix as needed.
 - `advice` — **written correctly but could be leaner**, five kinds: ≥10 Markdown files under one parent whose **whole text** is under 500 chars (counted as preamble + all `##` sections + `<node>` bodies, so "one file per chapter" is never misjudged as fragmentary), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters (its `fix` notes that splitting a section shifts positional TIDs). Every item carries a `fix` and **never affects `exit_code`**, so CI can ignore it.
 
 A `##` section's parent is **always the file node**: "organise by `##`" and named `<node>` anchors can coexist in one file, and the TOC lists them as siblings instead of chaining `3.1 → lesson1 → 3.2`.
@@ -117,6 +119,24 @@ A `##` section's parent is **always the file node**: "organise by `##`" and name
 A default `parent` follows **structure**, not "the first `<node>` in this file": sibling `<node>` blocks written at file level all hang off the file node, while a `<node>` written *inside* another one hangs off that outer node (flat = parallel, nested tags = nested nodes). `###` and deeper are **not nodes and not section boundaries** — they stay part of the `##` section's body, so referencing `doc:x:1.1` reports a stale TID prefix. The advice knobs (`minFragNodes`, `fragChars`, `longSection`, `maxItems`) can be overridden under `advice: { … }` in the plugin config.
 
 After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
+
+## Command line (`nodekb`)
+
+When you want the same engine outside DSH (CI, cron, another agent platform), call it directly after install:
+
+```bash
+nodekb list --all
+nodekb read doc:03-semantics --kb about-node-memory --find 行号
+nodekb search "regression gate" --kb F:/proj --lines
+nodekb diag --kb F:/proj --json          # exit code 0/2, easy to branch on
+nodekb write doc:05-x --kb F:/proj --file new-body.md --mode replace
+nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
+nodekb vcs log --kb F:/proj --count 5
+```
+
+- Library resolution: `--kb <name|library dir|any dir>`; defaults to `.nodekb` in the current directory. On the command line an explicit path *is* the authorisation, so the workspace allow-list does not apply (it only matters when a library is looked up by name).
+- Every command takes `--json`, with the same shape as the tools' `format: "json"`; read commands exit `0` on success, `1` when nothing matched, `2` on bad arguments or when the self-check finds errors.
+- Tools and CLI share **one engine** (`lib/engine/*`), so there is no second set of rules; `import … from 'project-node-memory/engine/mdlib.js'` gives the parser directly instead of importing source files by absolute path.
 
 ## How a library is located
 

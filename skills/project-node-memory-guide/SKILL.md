@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.11
+version: 1.5.12
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -44,6 +44,8 @@ kb_search query=... lines=true                      # 每个命中节点再给 �
 
 - 头部写明坐标：`[doc/03-x.md#L120-L179 · 本节点第 41–100 行 / 共 320 行]`——**文件行号**和**节点行号**是两套坐标，别混用。
 - 超 `maxlen` 不再报错：截断到上限，并在结尾给 `offset=` 续读坐标（`maxlen=0` 仍可强取全量）。
+
+**要按字段判断就传 `format: "json"`**（1.5.12 起，`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_diag`）：直接给结构化结果（`tid/source/lines/chars/hits`、diag 的 `errors/warnings/exit_code`），省得回去正则切片散文。`kb_diag` 在 json 模式下**不抛异常**，成不成功看 `exit_code`。
 - 行号只是**同一次解析快照内的临时坐标**，用来喂 `offset` 和定位；写进文档的引用一律用 TID。
 
 ## 目录规划
@@ -147,7 +149,7 @@ kb_write target=doc/03-...md          mode=append  content=...
 | 档         | 含义                                                                            | 怎么处理                   |
 | ---------- | ------------------------------------------------------------------------------- | -------------------------- |
 | `errors`   | 真损坏：悬空引用、重复 TID、重复定义、树环                                      | 必修，否则库结构已坏       |
-| `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点                 | 按需处理                   |
+| `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点、**散文/反引号里不可解析的 TID 文本**、**TID 大小写不合规** | 按需处理                   |
 | `advice`   | **没有问题，但可改进**：碎片文件过多、同一句散在多处、缺入口、缺 H1、段节点过长 | 建议处理，不影响 exit_code |
 
 `advice` 每条都带 `fix`，一次最多报 5 条，**不会让 `kb_diag` 失败**——CI 里可以无视。
@@ -163,7 +165,28 @@ kb_write target=doc/03-...md          mode=append  content=...
 
 段节点过长按**单个 `##` 段**算：拆节请拆 `##`（`###` 不建节点，拆了还是同一段）。`long-section` 的 `fix` 会点明拆节会让位置型 TID 漂移。
 
-**豁免表** `.nodekb/diag_ignore.json`：`{"blocks":[...],"lines":[...]}`，两项都是**正则**列表（逐条 `new RegExp(...)`）。按字面匹配要自己转义 `(` `)` `[` `]` `+` `|` `\` 这类元字符；非法正则会被静默跳过、不报错，于是「整段原文直接贴」只对不含元字符的样板有效（`blocks` 比的是归一化空白后的整段文本，`lines` 比的是单行原文）。
+**豁免表** `.nodekb/diag_ignore.json`：`{"blocks":[...],"lines":[...],"tids":[...]}`，三项都是**正则**列表（逐条 `new RegExp(...)`）。按字面匹配要自己转义 `(` `)` `[` `]` `+` `|` `\` 这类元字符；非法正则会被静默跳过、不报错，于是「整段原文直接贴」只对不含元字符的样板有效（`blocks` 比的是归一化空白后的整段文本，`lines` 比的是单行原文）。`tids` 只压「不可解析的 TID 文本」与「TID 大小写不合规」这两条，匹配的是 token 本身（如 `^doc:01-ignored$`）。
+
+**外形像 TID 的文本也会被核对**（1.5.12）：围栏外散文与行内代码里形如 `命名空间:其余` 的 token，只要命名空间是本库真实存在的（某个 TID 的首段、目录 `type`、`root`），就会被检查能否解析——`doc:03-build` 这种手写错的 TID 以前要等读者撞上，现在 `kb_diag` 直接报 `不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`；大小写写错（`doc:01-REAL`）报 `TID 大小写不合规 … → 应写「doc:01-real」`。反例（`×`/`✗` 前缀）、占位符（`doc:x`）、URL、markdown 链接目标、路径样子（`doc/03-build.md`）、别的命名空间都不报。
+
+## 命令行（`nodekb`，1.5.12 起）
+
+不在 DSH 里也能用同一套引擎：脚本、CI、别的 agent 平台调 `nodekb` 即可，**不要**再自己写 `kbq.py` / `kb_lint.mjs` / `kb_diag_dir.mjs` 这类包装器（本机五个库各自造过一轮，全部是同一个缺口）。
+
+| 命令 | 作用 |
+| --- | --- |
+| `nodekb list [--all]` | 列可用的库（`--all` 连全局登记一起列） |
+| `nodekb read <TID\|定义id>` | 同 `kb_read`：`--node/--toc/--raw`、`--offset/--limit`、`--find 词` |
+| `nodekb search <查询>` | 同 `kb_search`：`--lines`、`--type`、`--limit` |
+| `nodekb backlinks <TID\|定义id>` | 同 `kb_backlinks` |
+| `nodekb diag [--strict]` | 同 `kb_diag`，退出码 0/2 |
+| `nodekb write <TID\|相对路径>` | 同 `kb_write`：`--mode`、`--content/--file/--stdin` |
+| `nodekb rename <目标> <新文件名>` | 同 `kb_rename`，`--dry-run` 只报不动 |
+| `nodekb vcs [status\|log] [--count N]` | 快照历史（只读） |
+
+- 库定位：`--kb <库名|库目录|任意目录>`；省略时用当前目录的 `.nodekb`。命令行里**显式给路径**就是授权，所以不像工具层那样受工作区白名单限制；按名字找库时才用当前目录的发现结果。
+- 每个读命令都支持 `--json`，字段与工具层 `format: "json"` 一致（`{tid, source, lines, chars, hits, …}` / diag 的 `{errors, warnings, advice, exit_code}`），脚本里直接 `JSON.parse` 判分支。
+- 退出码：`0` 成功 / `1` 无命中或无变更 / `2` 参数错或自检有 error。
 
 ## 建库与注册
 

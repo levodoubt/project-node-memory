@@ -106,10 +106,12 @@ config:
 | `kb_rename`     | 文件改名 + 全库引用一起改写；写前重读，别人刚改的不覆盖                                                                                      |
 | `kb_vcs_status` | 内嵌 git 的最近几条快照 + 未提交改动（`count` 默认 5）；`kb_write` / `kb_rename` 成功后自动快照，`git: false` 可关；git 缺失时只说明，不报错 |
 
+读类工具（`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_diag`）都接受 `format: "json"`：直接把算好的结构化字段给出来（`tid/source/lines/chars/hits`，diag 为 `{errors, warnings, advice, exit_code}`），Agent 不用再回头解析散文；`kb_diag` 在 json 模式下不抛异常，成败看 `exit_code`。
+
 ### 自检的三档
 
-- `errors`：悬空引用、重复 TID、重复定义、树环 —— 库结构已坏，必修。
-- `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点 —— 按需处理。
+- `errors`：悬空引用、重复 TID、重复定义、树环、未闭合的 `<node>` / `<tscl>` —— 库结构已坏，必修。
+- `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点，以及**散文/行内代码里形如 TID 的文本解析不了**（`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`）与**TID 大小写不合规**（`→ 应写「doc:01-real」`）——按需处理。
 - `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个「整篇不足 500 字符」的 md（按整篇算：导语 + 全部 `##` 段 + `<node>` 正文，所以「一文件一章节」不会被误判）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 10000 字符（`fix` 会点明拆节会让位置型 TID 漂移）。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
 
 小节的父节点**恒为文件节点**：同一份文件里「按 `##` 组织」和「具名 `<node>` 锚点」并存时，TOC 里两者是并列的，不会再串成 `3.1 → lesson1 → 3.2` 的链。
@@ -117,6 +119,24 @@ config:
 默认父节点由**结构**决定，而不是「本文件第一个 `<node>`」：同文件里多个并列写开的 `<node>` 都挂文件节点，写进另一个 `<node>` 里的才挂外层（想并列就平铺，想嵌套就把标签写开）。`###` 及更深**不建节点、也不切段**——它是段正文的一部分，拿 `doc:x:1.1` 这种 TID 去引用会报「前缀指向不存在的节点」。长段阈值等 advice 参数可在插件配置 `advice: { … }` 里覆盖。
 
 插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，已在库内 `.gitignore` 里）。
+
+## 命令行（`nodekb`）
+
+不在 DSH 里也想用同一套引擎（CI、定时任务、别的 agent 平台）时，装完包直接调：
+
+```bash
+nodekb list --all
+nodekb read doc:03-semantics --kb about-node-memory --find 行号
+nodekb search "回归闸门" --kb F:/proj --lines
+nodekb diag --kb F:/proj --json          # 退出码 0/2，脚本里直接判
+nodekb write doc:05-x --kb F:/proj --file 新正文.md --mode replace
+nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
+nodekb vcs log --kb F:/proj --count 5
+```
+
+- 库定位：`--kb <库名|库目录|任意目录>`，省略时用当前目录的 `.nodekb`。命令行里显式给路径即授权，不受工作区白名单限制。
+- 每个命令都支持 `--json`，字段与工具层 `format: "json"` 一致；读命令退出码 `0` 成功、`1` 无命中、`2` 参数错或自检有 error。
+- 工具层与命令行**共用同一份引擎**（`lib/engine/*`），没有第二套判定逻辑；`require('project-node-memory/engine')` 或 `import … from 'project-node-memory/engine/mdlib.js'` 可直接拿解析器，不必再按绝对路径 import 源码。
 
 ## 库怎么定位
 
