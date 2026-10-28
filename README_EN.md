@@ -111,7 +111,7 @@ The read-side tools (`kb_list` / `kb_read` / `kb_search` / `kb_backlinks` / `kb_
 ### The three tiers of `kb_diag`
 
 - `errors` — dangling refs, duplicate TIDs, duplicate definitions, tree cycles, unclosed `<node>` / `<tscl>`: the structure is broken, must fix.
-- `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes, and **TID-shaped text in prose or inline code that does not resolve** (`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`) plus **non-lowercase TIDs** (`→ 应写「doc:01-real」`): fix as needed.
+- `warnings` — legacy bare refs, links to positional TIDs, multi-line macros inside table cells, orphan nodes, **TID-shaped text in prose or inline code that does not resolve** (`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`), **non-lowercase TIDs** (`→ 应写「doc:01-real」`), and **any breach of the library's own `rules.json`** (see below): fix as needed.
 - `advice` — **written correctly but could be leaner**, five kinds: ≥10 Markdown files under one parent whose **whole text** is under 500 chars (counted as preamble + all `##` sections + `<node>` bodies, so "one file per chapter" is never misjudged as fragmentary), the same sentence spread across several nodes (promote to a `<tscl>` definition), a library without `index/entry.md`, Markdown without an H1, a section longer than 10000 characters (its `fix` notes that splitting a section shifts positional TIDs). Every item carries a `fix` and **never affects `exit_code`**, so CI can ignore it.
 
 A `##` section's parent is **always the file node**: "organise by `##`" and named `<node>` anchors can coexist in one file, and the TOC lists them as siblings instead of chaining `3.1 → lesson1 → 3.2`.
@@ -119,6 +119,22 @@ A `##` section's parent is **always the file node**: "organise by `##`" and name
 A default `parent` follows **structure**, not "the first `<node>` in this file": sibling `<node>` blocks written at file level all hang off the file node, while a `<node>` written *inside* another one hangs off that outer node (flat = parallel, nested tags = nested nodes). `###` and deeper are **not nodes and not section boundaries** — they stay part of the `##` section's body, so referencing `doc:x:1.1` reports a stale TID prefix. The advice knobs (`minFragNodes`, `fragChars`, `longSection`, `maxItems`) can be overridden under `advice: { … }` in the plugin config.
 
 After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
+
+## The library's own rules (`.nodekb/rules.json`)
+
+`diag_ignore.json` decides which warnings to silence; `rules.json` decides how this library must be written. Without the file nothing changes.
+
+```json
+{
+  "refStyle": { "default": "plain", "doc": "expand", "lessons": "expand" },
+  "limits": { "bytes": { "default": 12288, "lessons": 4096 } }
+}
+```
+
+- A directory key is the file's **first path segment** relative to the library root; loose files at the root use `.`; anything not listed falls back to `default`.
+- `refStyle` = `expand`: `[[node="…"]]` is allowed and `[[tscl="…"]]` may only target definitions starting with `fact:`; = `plain`: no `[[…]]` at all — write the TID as inline code instead.
+- `limits.bytes`: per-file size ceiling in bytes; exceeding it is a warning.
+- Examples inside fences and inline code are exempt; violations report the library-relative path plus the file line; a broken `rules.json` yields one warning and never stops the library from loading.
 
 ## Command line (`nodekb`)
 
@@ -131,6 +147,7 @@ nodekb search "regression gate" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # exit code 0/2, easy to branch on
 nodekb write doc:05-x --kb F:/proj --file new-body.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
+nodekb rename --batch plan.json --kb F:/proj --dry-run   # batch rename: re-reads the library per item, stops on first failure
 nodekb vcs log --kb F:/proj --count 5
 ```
 

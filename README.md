@@ -111,7 +111,7 @@ config:
 ### 自检的三档
 
 - `errors`：悬空引用、重复 TID、重复定义、树环、未闭合的 `<node>` / `<tscl>` —— 库结构已坏，必修。
-- `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点，以及**散文/行内代码里形如 TID 的文本解析不了**（`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`）与**TID 大小写不合规**（`→ 应写「doc:01-real」`）——按需处理。
+- `warnings`：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点，**散文/行内代码里形如 TID 的文本解析不了**（`不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`）、**TID 大小写不合规**（`→ 应写「doc:01-real」`），以及**违反本库 `rules.json` 的规矩**（见下）——按需处理。
 - `advice`：**写得对但还能更省**，五类 —— 同父目录下 ≥10 个「整篇不足 500 字符」的 md（按整篇算：导语 + 全部 `##` 段 + `<node>` 正文，所以「一文件一章节」不会被误判）、同一句散在多个节点（建议提出 `<tscl>` 定义）、库根缺 `index/entry.md`、md 缺一级标题、段节点超过 10000 字符（`fix` 会点明拆节会让位置型 TID 漂移）。每条都带 `fix`，**不影响 `exit_code`**，CI 里可以无视。
 
 小节的父节点**恒为文件节点**：同一份文件里「按 `##` 组织」和「具名 `<node>` 锚点」并存时，TOC 里两者是并列的，不会再串成 `3.1 → lesson1 → 3.2` 的链。
@@ -119,6 +119,22 @@ config:
 默认父节点由**结构**决定，而不是「本文件第一个 `<node>`」：同文件里多个并列写开的 `<node>` 都挂文件节点，写进另一个 `<node>` 里的才挂外层（想并列就平铺，想嵌套就把标签写开）。`###` 及更深**不建节点、也不切段**——它是段正文的一部分，拿 `doc:x:1.1` 这种 TID 去引用会报「前缀指向不存在的节点」。长段阈值等 advice 参数可在插件配置 `advice: { … }` 里覆盖。
 
 插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，已在库内 `.gitignore` 里）。
+
+## 库自己的规矩（`.nodekb/rules.json`）
+
+`diag_ignore.json` 管「哪些警告别报」，`rules.json` 管「我们这儿必须这么写」。没有这个文件时行为不变。
+
+```json
+{
+  "refStyle": { "default": "plain", "doc": "expand", "lessons": "expand" },
+  "limits": { "bytes": { "default": 12288, "lessons": 4096 } }
+}
+```
+
+- 目录键是文件相对库根的**第一段目录**，库根下的散文件用 `.`；未列出的目录回落到 `default`。
+- `refStyle` = `expand`：允许 `[[node="…"]]`，`[[tscl="…"]]` 只允许指向 `fact:` 开头的定义；= `plain`：不许写 `[[…]]`，改写成反引号纯文本。
+- `limits.bytes`：单文件体积上限（字节），超了报 warning。
+- 围栏示例与行内代码不算违规；违规带库内相对路径与文件行号；`rules.json` 写坏只报一条 warning，不影响读库。
 
 ## 命令行（`nodekb`）
 
@@ -131,6 +147,7 @@ nodekb search "回归闸门" --kb F:/proj --lines
 nodekb diag --kb F:/proj --json          # 退出码 0/2，脚本里直接判
 nodekb write doc:05-x --kb F:/proj --file 新正文.md --mode replace
 nodekb rename doc:05-x 06-x --kb F:/proj --dry-run
+nodekb rename --batch 计划.json --kb F:/proj --dry-run   # 批量改名，逐条重读库、中途失败即停
 nodekb vcs log --kb F:/proj --count 5
 ```
 

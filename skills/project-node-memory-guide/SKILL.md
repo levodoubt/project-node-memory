@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.12
+version: 1.5.13
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -141,6 +141,8 @@ kb_write target=doc/03-...md          mode=append  content=...
 - `new_name` **只能是同目录的文件名**：带目录分隔符或 `..` 会被拒；跨目录搬文件先手工 `git mv` 再跑 `kb_rename` 修引用。新名字 slug 化后若撞上已有 TID（`03 a` 与 `03-a` 是同一个）也会被拒。改名有 error 时回执会写明，退出码 2。
 - 它会重写 `[[…]]` 引用**和** `<node>` 的 `tid=` / `name=` / `parent=` 属性（`parent` 漏改子节点会立刻变孤儿，`diag` 直接 errors）；单双引号都认，围栏里的示例不动；属性在 `<node>` 开标签上跨行书写时不会被改（只改单行内的那份）。改名后若还有节点 TID 前缀指向已不存在的旧文件，`kb_diag` 会 warning「TID 前缀指向不存在的节点」。
 - **改名同样先自检、再快照**（坏结构不进 git 历史，和 `kb_write` 一致）。撞名报错给的是库内相对路径，不是绝对路径。
+- **只改大小写的改名可以用 `kb_rename` 了**（1.5.13）：`031-T7代理.md → 031-t7代理.md`。TID 本来就被小写化，所以这种改名不动引用、只动文件系统；以前在 Windows/macOS 上会报「目标已存在」。
+- 要一次改很多个文件，用 `nodekb rename --batch 计划.json`（见下面的命令行一节），不要写脚本循环调 `kb_rename`。
 
 ## 诊断（`kb_diag`）
 
@@ -149,7 +151,7 @@ kb_write target=doc/03-...md          mode=append  content=...
 | 档         | 含义                                                                            | 怎么处理                   |
 | ---------- | ------------------------------------------------------------------------------- | -------------------------- |
 | `errors`   | 真损坏：悬空引用、重复 TID、重复定义、树环                                      | 必修，否则库结构已坏       |
-| `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点、**散文/反引号里不可解析的 TID 文本**、**TID 大小写不合规** | 按需处理                   |
+| `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、跨行宏进表格、孤儿节点、**散文/反引号里不可解析的 TID 文本**、**TID 大小写不合规**、**违反本库 `rules.json` 的规矩** | 按需处理                   |
 | `advice`   | **没有问题，但可改进**：碎片文件过多、同一句散在多处、缺入口、缺 H1、段节点过长 | 建议处理，不影响 exit_code |
 
 `advice` 每条都带 `fix`，一次最多报 5 条，**不会让 `kb_diag` 失败**——CI 里可以无视。
@@ -169,6 +171,27 @@ kb_write target=doc/03-...md          mode=append  content=...
 
 **外形像 TID 的文本也会被核对**（1.5.12）：围栏外散文与行内代码里形如 `命名空间:其余` 的 token，只要命名空间是本库真实存在的（某个 TID 的首段、目录 `type`、`root`），就会被检查能否解析——`doc:03-build` 这种手写错的 TID 以前要等读者撞上，现在 `kb_diag` 直接报 `不可解析的 TID 文本 … 文件第 N 行「…」；最接近: …`；大小写写错（`doc:01-REAL`）报 `TID 大小写不合规 … → 应写「doc:01-real」`。反例（`×`/`✗` 前缀）、占位符（`doc:x`）、URL、markdown 链接目标、路径样子（`doc/03-build.md`）、别的命名空间都不报。
 
+## 库自己的规矩（`.nodekb/rules.json`，1.5.13 起）
+
+`diag_ignore.json` 管「哪些警告别报」，`rules.json` 管「我们这儿必须这么写」。没有这个文件时行为完全不变。
+
+```json
+{
+  "refStyle": { "default": "plain", "doc": "expand", "lessons": "expand" },
+  "limits": { "bytes": { "default": 12288, "lessons": 4096 } }
+}
+```
+
+- 目录键是文件相对库根的**第一段目录**（`doc`、`lessons`…），库根下的散文件用 `.`；没列出的目录回落到 `default`，连 `default` 都没有就不查。
+- `refStyle`：
+  - `expand` —— 允许 `[[node="…"]]`；`[[tscl="…"]]` **只允许指向 `fact:` 开头的定义**（随手写的常量不许到处展开）。
+  - `plain` —— 不许写 `[[…]]`，要写就写反引号里的纯文本（TID 仍可读，只是不建链接）。
+- `limits.bytes`：单个文件的体积上限（字节）。超了报 warning，fix 是「拆成几个文件，或把这条规则改掉」。
+- 围栏里的示例、行内代码里的写法都不算违规；报错带库内相对路径与文件行号。
+- `rules.json` 写坏了（不是 JSON、字段非法）只报一条 warning，不会让库读不了。
+
+规则是**声明式检查**，插件不会替你自动改写：违规照常报出来，改不改由你决定。
+
 ## 命令行（`nodekb`，1.5.12 起）
 
 不在 DSH 里也能用同一套引擎：脚本、CI、别的 agent 平台调 `nodekb` 即可，**不要**再自己写 `kbq.py` / `kb_lint.mjs` / `kb_diag_dir.mjs` 这类包装器（本机五个库各自造过一轮，全部是同一个缺口）。
@@ -181,7 +204,7 @@ kb_write target=doc/03-...md          mode=append  content=...
 | `nodekb backlinks <TID\|定义id>` | 同 `kb_backlinks` |
 | `nodekb diag [--strict]` | 同 `kb_diag`，退出码 0/2 |
 | `nodekb write <TID\|相对路径>` | 同 `kb_write`：`--mode`、`--content/--file/--stdin` |
-| `nodekb rename <目标> <新文件名>` | 同 `kb_rename`，`--dry-run` 只报不动 |
+| `nodekb rename <目标> <新文件名>` | 同 `kb_rename`，`--dry-run` 只报不动；`--batch 计划.json` 批量改（数组或 `{"renames":[{target,new_name}]}`，逐条重读库、中途失败即停） |
 | `nodekb vcs [status\|log] [--count N]` | 快照历史（只读） |
 
 - 库定位：`--kb <库名|库目录|任意目录>`；省略时用当前目录的 `.nodekb`。命令行里**显式给路径**就是授权，所以不像工具层那样受工作区白名单限制；按名字找库时才用当前目录的发现结果。

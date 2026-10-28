@@ -2308,6 +2308,101 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpK, { recursive: true, force: true })
 }
 
+// ── 20. P1：只改大小写的改名 / 库规则 rules.json / 批量改名计划 ──────────────
+{
+  section('只改大小写改名、库规则（rules.json）、批量改名（1.5.13）')
+  const tmpP = path.join(root, '.tmp-p1')
+  fs.rmSync(tmpP, { recursive: true, force: true })
+  const kbP = path.join(tmpP, '.nodekb')
+  fs.mkdirSync(path.join(kbP, 'doc'), { recursive: true })
+  fs.mkdirSync(path.join(kbP, 'lessons'), { recursive: true })
+  fs.writeFileSync(path.join(kbP, 'doc/031-T7代理.md'), '# T7 代理\n\n正文。\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/ref.md'), '# 引用\n\n见 [[node="doc:031-t7代理"]]。\n', 'utf8')
+
+  const { renameFileNode } = await import(url(path.join(root, 'lib/engine/rename.js')))
+  const { parse_library } = await import(url(path.join(root, 'lib/engine/mdlib.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const { collectDefs } = await import(url(path.join(root, 'lib/engine/defs.js')))
+  const openP = () => parse_library(kbP, [])
+
+  // ① 只改大小写：Windows/macOS 上不该再报「目标已存在」
+  const nodesC = openP()
+  ok('夹具的 TID 是小写形态', nodesC.has('doc:031-t7代理'), [...nodesC.keys()].join(','))
+  const repC = renameFileNode({ nodekb: kbP, nodes: nodesC, defs: [] }, 'doc/031-T7代理.md', '031-t7代理')
+  ok(
+    '只改大小写的改名成功（不再报目标已存在）',
+    repC.case_only === true && fs.existsSync(path.join(kbP, 'doc/031-t7代理.md')),
+    JSON.stringify(repC).slice(0, 140),
+  )
+  ok('只改大小写不动引用、TID 不变', repC.rewritten.length === 0 && repC.new_tid === repC.tid, JSON.stringify(repC).slice(0, 120))
+  ok('只改大小写后旧名字不再存在', !fs.readdirSync(path.join(kbP, 'doc')).includes('031-T7代理.md'), fs.readdirSync(path.join(kbP, 'doc')).join(','))
+
+  // ② rules.json：refStyle + limits
+  const rulesPath = path.join(kbP, 'rules.json')
+  fs.writeFileSync(path.join(kbP, 'lessons/01-严.md'), '# 严\n\n这里写了 [[node="doc:ref"]] 展开引用。\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/tscl.md'), '# tscl\n\n随手写的常量 [[tscl="硬编码值"]]。\n合法的 [[tscl="fact:端口"]]。\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/示例.md'), '# 示例\n\n`[[node="doc:ref"]]` 只在行内代码里出现。\n\n```md\n[[tscl="随便"]]\n```\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/facts.md'), '# 事实\n\n<tscl id="fact:端口">8080</tscl>\n\n<tscl id="硬编码值">写死的常量</tscl>\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/big.md'), '# 大文件\n\n' + '填充内容。'.repeat(200) + '\n', 'utf8')
+  fs.writeFileSync(
+    rulesPath,
+    JSON.stringify({ refStyle: { default: 'expand', lessons: 'plain' }, limits: { bytes: { default: 65536, doc: 1200 } } }),
+    'utf8',
+  )
+  const diagWithRules = () => {
+    const nodes = openP()
+    const { defs, problems } = collectDefs(nodes)
+    return diag(nodes, { problems, libRoot: kbP, defs }).report
+  }
+  const repR = diagWithRules()
+  const warnsR = repR.warnings.join('\n')
+  ok('plain 目录里的 [[node]] 被点名（带文件行号）', /lessons\/01-严\.md 第 3 行/.test(warnsR), warnsR.slice(0, 200))
+  ok('expand 目录里展开非 fact:* 定义被点名', /doc\/tscl\.md 第 3 行/.test(warnsR) && /硬编码值/.test(warnsR), warnsR.slice(0, 300))
+  ok('expand 目录里 fact:* 定义不报', !/fact:端口/.test(warnsR), warnsR.slice(0, 300))
+  ok('行内代码与围栏里的写法不算违规', !/示例\.md/.test(warnsR), warnsR.slice(0, 300))
+  ok('超过本目录体积上限被报出', /doc\/big\.md .*超过 rules\.json/.test(warnsR), warnsR.slice(0, 300))
+  const rulesWarnCount = repR.warnings.filter((w) => /rules\.json/.test(w)).length
+  ok('三处违规各报一条（不含重复）', rulesWarnCount === 3, String(rulesWarnCount) + ' :: ' + warnsR.slice(0, 200))
+  ok('rules 违规只算 warning（不升 error）', repR.errors.length === 0, JSON.stringify(repR.errors))
+
+  // 坏掉的 rules.json 只报一条警告，不让库读不了
+  fs.writeFileSync(rulesPath, '{ 不是 JSON', 'utf8')
+  const repBad = diagWithRules()
+  ok('rules.json 写坏时报一条警告而不是崩', repBad.warnings.some((w) => /不是合法 JSON/.test(w)), repBad.warnings.join('\n').slice(0, 160))
+  fs.rmSync(rulesPath, { force: true })
+  const repNone = diagWithRules()
+  ok('没有 rules.json 时零规则告警（默认行为不变）', !repNone.warnings.some((w) => /rules-/.test(w)), repNone.warnings.join('\n').slice(0, 160))
+
+  // ③ 批量改名：--batch 计划，先演练再执行
+  const planP = path.join(tmpP, 'plan.json')
+  fs.writeFileSync(path.join(kbP, 'doc/a.md'), '# A\n\n引用 [[node="doc:b"]] 与 [[node="doc:c"]]。\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/b.md'), '# B\n\n乙。\n', 'utf8')
+  fs.writeFileSync(path.join(kbP, 'doc/c.md'), '# C\n\n丙。\n', 'utf8')
+  fs.writeFileSync(planP, JSON.stringify({ renames: [{ target: 'doc/a.md', new_name: 'a1' }, { target: 'doc/b.md', new_name: 'b1' }] }), 'utf8')
+  const cliP = path.join(root, 'bin/nodekb.mjs')
+  const runP = (args) => {
+    try {
+      return { code: 0, out: execFileSync(process.execPath, [cliP, ...args], { cwd: root, encoding: 'utf8' }) }
+    } catch (e) {
+      return { code: e.status == null ? -1 : e.status, out: String(e.stdout || '') + String(e.stderr || '') }
+    }
+  }
+  const dryP = runP(['rename', '--batch', planP, '--kb', kbP, '--dry-run'])
+  ok('批量改名 --dry-run 只演练不落盘', dryP.code === 0 && fs.existsSync(path.join(kbP, 'doc/a.md')) && !fs.existsSync(path.join(kbP, 'doc/a1.md')), dryP.out.slice(0, 160))
+  const appP = runP(['rename', '--batch', planP, '--kb', kbP])
+  ok('批量改名逐条落盘', appP.code === 0 && fs.existsSync(path.join(kbP, 'doc/a1.md')) && fs.existsSync(path.join(kbP, 'doc/b1.md')), appP.out.slice(0, 200))
+  const textA1 = fs.readFileSync(path.join(kbP, 'doc/a1.md'), 'utf8')
+  ok('批量改名的引用重写串起来了（a→a1 里对 b 的引用跟着 b→b1）', /doc:b1/.test(textA1) && /doc:c/.test(textA1), textA1)
+  ok('批量改名回执列出每一条', /doc\/a\.md → doc\/a1\.md/.test(appP.out) && /doc\/b\.md → doc\/b1\.md/.test(appP.out), appP.out.slice(0, 200))
+  const badPlan = path.join(tmpP, 'bad.json')
+  fs.writeFileSync(badPlan, JSON.stringify([{ target: 'doc/a1.md', new_name: 'a9' }, { target: 'doc/不存在.md', new_name: 'x' }]), 'utf8')
+  const failP = runP(['rename', '--batch', badPlan, '--kb', kbP])
+  ok('批量改名中途失败会停并说明停在第几条', failP.code !== 0 && /第 2 \/ 2 条失败/.test(failP.out), failP.out.slice(0, 200))
+  ok('中途失败前的改名已落盘且被回执列出', fs.existsSync(path.join(kbP, 'doc/a9.md')), fs.readdirSync(path.join(kbP, 'doc')).join(','))
+
+  fs.rmSync(tmpP, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言
