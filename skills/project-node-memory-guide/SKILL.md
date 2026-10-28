@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.16
+version: 1.5.17
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -89,9 +89,10 @@ kb_write target=doc/03-...md      mode=append  content=...
 | ---------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------- |
 | `errors`   | 真损坏：悬空引用、重复 TID/定义、树环、未闭合 `<node>`/`<tscl>`                                                       | 必修                       |
 | `warnings` | 疑似漂移：旧语法裸引用、位置型 TID 链接、孤儿节点、散文里不可解析的 TID 文本、TID 大小写不合规、违反本库 `rules.json` | 按需处理                   |
-| `advice`   | 没问题但可改进：碎片文件、缺入口/H1、段节点过长                                                                       | 建议处理，不影响 exit_code |
+| `advice`   | 没问题但可改进：碎片文件、缺入口/H1、段节点过长、示例被写成了定义                                                     | 建议处理，不影响 exit_code |
 
 - `advice` 每条带 `fix`，一次最多 5 条，不会让 `kb_diag` 失败（CI 可以无视）。
+- 确属有意、又不想每次看见：`diag_ignore.json` 的 `advice` 按 `{code, tid}` 压掉单条，`warnings` 按整条文案正则压掉一条 warning（1.5.17）。
 - 阈值默认 `minFragNodes 10 / fragChars 500 / longSection 10000 / maxItems 5`，可在插件配置 `advice: { … }` 覆盖。
 
 细节（豁免表 `diag_ignore.json` 的三组正则、TID 文本核对的豁免、`plugin-updated`）：`references/diag.md`。
@@ -100,6 +101,7 @@ kb_write target=doc/03-...md      mode=append  content=...
 
 - 建库：`kb_init` 的 `dir` 是**库目录本身**（通常 `.nodekb`）；传上级目录会被拒。默认铺 `doc/`、`index/entry.md`、`lessons/`、`todo/`，只用几个就传 `parts: ["doc","index"]`（`README.md` 与 `diag_ignore.json` 总是铺）。
 - 找不到库先 `kb_list`（会写明工作区、来源与每个库的绝对路径）；已有库用 `kb_register dir=<库目录> name=<名字>` 登记进项目。
+- 列表末尾还会提醒「另有 N 个库不在本工作区」（打开过的库记在 `~/.dsh/nodekb/index.json`）：它们不会被本工作区的名字解析到，用路径传 `kb=`。
 - 升级后第一次 `kb_diag` 会多一条 `plugin-updated`（提醒重读本技能），每条库只提醒一次。
 
 ## 命令行与库规矩
@@ -113,7 +115,7 @@ kb_write target=doc/03-...md      mode=append  content=...
 | ----------------------- | ---------------------------------------------------------- |
 | `references/syntax.md`  | TID 全规则、属性缺省、两种引用、行内定义、代码区、渲染上限 |
 | `references/write.md`   | `kb_write` 全部限制、`target` 判定、校验两层、四道拦截     |
-| `references/diag.md`    | 三档细节、advice 阈值与判据、豁免表、TID 文本核对          |
+| `references/diag.md`    | 三档细节、advice 阈值与判据、豁免表（五组）、TID 文本核对  |
 | `references/cli.md`     | `nodekb` 命令表、`--json`、退出码、批量改名计划文件        |
 | `references/rules.md`   | `rules.json` 两个键的语义与现成配置                        |
-| `references/changes.md` | 版本升级说明：1.5.9→1.5.14 相比已推送的 1.5.8 多了什么     |
+| `references/changes.md` | 版本升级说明：新版本更新了什么                             |

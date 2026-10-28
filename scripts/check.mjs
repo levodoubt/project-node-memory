@@ -2654,6 +2654,93 @@ section('tscl 定义与双语法')
   fs.rmSync(tmpR, { recursive: true, force: true })
 }
 
+// ── 24. 宿主与引擎同构 / 示例被当成定义 / 警告豁免 / 跨项目库记忆（1.5.17）────
+{
+  section('宿主 find 退让、示例定义 advice、警告豁免、跨项目索引（1.5.17）')
+  const { buildTools } = await import(url(path.join(root, 'lib/host/tools.js')))
+  const { computeAdvice } = await import(url(path.join(root, 'lib/engine/advice.js')))
+  const { diag } = await import(url(path.join(root, 'lib/engine/diag.js')))
+  const { openLibrary, bindServices } = await import(url(path.join(root, 'lib/host/runtime.js')))
+  const { rememberLibrary } = await import(url(path.join(root, 'lib/engine/config.js')))
+
+  const tmpFb = path.join(root, '.tmp-fb')
+  fs.rmSync(tmpFb, { recursive: true, force: true })
+  const kbFb = path.join(tmpFb, '.nodekb')
+  fs.mkdirSync(path.join(kbFb, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(kbFb, 'README.md'), '# 库\n', 'utf8')
+  // ① 宿主层 find 退让：同一行里两个词不相邻
+  fs.writeFileSync(
+    path.join(kbFb, 'doc/seed.md'),
+    '# 播种\n\n## 1. 基准\n\n**（2）PSO 以 `time(0)` 播种 ⇒ 每轮时间基准不同。\n',
+    'utf8',
+  )
+  // ② 示例被当成定义：行首 <tscl> 一直吃到 </tscl>，中间把 `##` 标题吞进定义体
+  fs.writeFileSync(
+    path.join(kbFb, 'doc/example.md'),
+    ['# 示例', '', '<tscl id="bad-example">', '## 被吞掉的标题', '', '正文。', '</tscl>', ''].join('\n'),
+    'utf8',
+  )
+  // ③ 有意共用的重复内容
+  const dupLine = '这条基线七个版本共用同一行，故意不拆开也不改，因为它是硬件实测的原始刻度，改了就对不上老数据。'
+  fs.writeFileSync(path.join(kbFb, 'doc/versions-a.md'), `# 版本 A\n\n${dupLine}\n`, 'utf8')
+  fs.writeFileSync(path.join(kbFb, 'doc/versions-b.md'), `# 版本 B\n\n${dupLine}\n`, 'utf8')
+
+  const ctxFb = {
+    tools: { register: (t) => { toolsFb[t.name] = t; return () => {} } },
+    webServer: { register: () => () => {} },
+    get: (n) => (n === 'sessions' ? { get: (id) => (id === 's-fb' ? { header: { cwd: tmpFb } } : null) } : null),
+  }
+  const toolsFb = {}
+  bindServices(ctxFb)
+  buildTools(ctxFb, { git: false })
+  const exFb = { agent: { id: 's-fb' } }
+  const libFb = openLibrary(ctxFb, exFb, {})
+
+  // —— ① 宿主 kb_read（以前只有整串匹配，引擎的退让接不上）
+  const seedTid = [...libFb.nodes.values()].find((n) => n.source && String(n.source).replace(/#L.*$/, '').endsWith('doc/seed.md')).tid
+  const hostFind = await toolsFb.kb_read.execute({ target: seedTid, find: '播种 time' }, exFb)
+  ok('宿主层的 kb_read find 也会按词退让', /播种 \+ time/.test(String(hostFind.text || '')) && hostFind.hits === 1, String(hostFind.text || '').slice(0, 140))
+  ok('宿主层退让也标 loose（回执可判）', hostFind.loose === true && hostFind.used === '播种 + time', JSON.stringify({ loose: hostFind.loose, used: hostFind.used }))
+  const hostExact = await toolsFb.kb_read.execute({ target: seedTid, find: '时间基准不同' }, exFb)
+  ok('宿主层精确命中不被退让顶掉', hostExact.loose !== true && hostExact.hits === 1, String(hostExact.text || '').slice(0, 80))
+  const hostMiss = await toolsFb.kb_read.execute({ target: seedTid, find: '播种 折射率' }, exFb)
+  ok('宿主层退让后仍不中才报未命中', hostMiss.hits === 0 && /未命中/.test(String(hostMiss.text || '')), String(hostMiss.text || '').slice(0, 60))
+
+  // —— ② 示例被当成定义
+  const advFb = computeAdvice(libFb.nodes, libFb.defs, libFb.nodekb)
+  const ex = advFb.find((a) => a.code === 'example-tscl')
+  ok('示例：吞了标题行的定义被抓出来', !!ex && /bad-example/.test(ex.message), JSON.stringify(ex || {}).slice(0, 160))
+  ok('示例：fix 指向「放进围栏」', !!ex && /围栏/.test(ex.fix), ex ? ex.fix.slice(0, 80) : '')
+  const cleanLib = [...libFb.defs.values()].filter((d) => d.id !== 'bad-example')
+  ok('示例：普通一句话定义不误报', computeAdvice(libFb.nodes, new Map(cleanLib.map((d) => [d.id, d])), libFb.nodekb).every((a) => a.code !== 'example-tscl'), '')
+
+  // —— ③ 警告豁免：diag_ignore.json 的 warnings 组
+  const before = diag(libFb.nodes, { libRoot: libFb.nodekb, defs: libFb.defs, advice: [] })
+  ok('重复内容默认被报出', before.report.warnings.some((w) => /内容重复/.test(w)), String(before.report.warnings.length))
+  ok('重复内容 warning 里告知怎么豁免', before.report.warnings.some((w) => /内容重复/.test(w) && /diag_ignore/.test(w)), '')
+  fs.writeFileSync(path.join(kbFb, 'diag_ignore.json'), JSON.stringify({ warnings: ['内容重复'] }, null, 2), 'utf8')
+  const after = diag(libFb.nodes, { libRoot: libFb.nodekb, defs: libFb.defs, advice: [] })
+  ok('warnings 组按整条文案豁免', !after.report.warnings.some((w) => /内容重复/.test(w)), String(after.report.warnings.length))
+  ok('豁免掉 warning 后退出码不再受影响', after.report.exit_code === 0, String(after.report.exit_code))
+  fs.rmSync(path.join(kbFb, 'diag_ignore.json'), { force: true })
+
+  // —— ④ 跨项目库：kb_list 末尾提醒「另外还有这些库」
+  const prevIdx = process.env.NODEKB_INDEX
+  process.env.NODEKB_INDEX = path.join(tmpFb, 'index.json')
+  const otherKb = path.join(root, 'fb-elsewhere', '.nodekb')
+  fs.mkdirSync(path.join(otherKb, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(otherKb, 'doc/p.md'), '# 别处\n\n内容。\n', 'utf8')
+  rememberLibrary(otherKb, 'other-project')
+  const listOut = await toolsFb.kb_list.execute({}, exFb)
+  ok('kb_list 末尾提醒不在此工作区的库', /另有 1 个库不在本工作区/.test(String(listOut.text || '')), String(listOut.text || '').split('\n').slice(-3).join(' | '))
+  ok('提醒里带库名与所在目录', /other-project/.test(String(listOut.text || '')), '')
+  if (prevIdx === undefined) delete process.env.NODEKB_INDEX
+  else process.env.NODEKB_INDEX = prevIdx
+
+  fs.rmSync(tmpFb, { recursive: true, force: true })
+  fs.rmSync(path.join(root, 'fb-elsewhere'), { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言
