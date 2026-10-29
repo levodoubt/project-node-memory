@@ -1,6 +1,6 @@
 ---
 name: project-node-memory-guide
-version: 1.5.17
+version: 1.5.18
 description: 用 .nodekb/ + kb_* 工具沉淀项目长期知识（设计决策、踩坑、事实常量、待办、交接）时的写法规范——什么时候该写、文件怎么分、TID 怎么起、唯一事实用 tscl 怎么共享、先读什么再写什么。准备创建知识库时先读该技能。
 ---
 
@@ -102,7 +102,7 @@ kb_write target=doc/03-...md      mode=append  content=...
 - 建库：`kb_init` 的 `dir` 是**库目录本身**（通常 `.nodekb`）；传上级目录会被拒。默认铺 `doc/`、`index/entry.md`、`lessons/`、`todo/`，只用几个就传 `parts: ["doc","index"]`（`README.md` 与 `diag_ignore.json` 总是铺）。
 - 找不到库先 `kb_list`（会写明工作区、来源与每个库的绝对路径）；已有库用 `kb_register dir=<库目录> name=<名字>` 登记进项目。
 - 列表末尾还会提醒「另有 N 个库不在本工作区」（打开过的库记在 `~/.dsh/nodekb/index.json`）：它们不会被本工作区的名字解析到，用路径传 `kb=`。
-- 升级后第一次 `kb_diag` 会多一条 `plugin-updated`（提醒重读本技能），每条库只提醒一次。
+- 升级后第一次 `kb_diag` 会多一条 `plugin-updated`（提醒重读本技能），每条库只提醒一次；它不受 `advice.display` 控制、但计入 `advice.limit`。
 
 ## 命令行与库规矩
 

@@ -120,7 +120,7 @@ config:
 
 默认父节点由**结构**决定，而不是「本文件第一个 `<node>`」：同文件里多个并列写开的 `<node>` 都挂文件节点，写进另一个 `<node>` 里的才挂外层（想并列就平铺，想嵌套就把标签写开）。`###` 及更深**不建节点、也不切段**——它是段正文的一部分，拿 `doc:x:1.1` 这种 TID 去引用会报「前缀指向不存在的节点」。长段阈值等 advice 参数可在插件配置 `advice: { … }` 里覆盖。
 
-插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，已在库内 `.gitignore` 里）。
+插件升级后第一次跑 `kb_diag`，报告里会多一条 `plugin-updated`，提醒重读随包技能；每个库只提醒一次（状态记在 `.nodekb/.plugin-state.json`，由 `.git/info/exclude` 忽略——诊断不该把库弄成「有未提交改动」）。这条提醒**不受** `advice: { display: false }` 控制（那个开关只关改进建议），但**计入** `advice.limit` / `maxItems`，且排在最前；命令行 `nodekb diag` 与它同构。状态文件写不进去（只读库、权限不足）时，回执会追加一句「（状态文件写不进去，下次还会提醒）」。
 
 ## 库自己的规矩（`.nodekb/rules.json`）
 

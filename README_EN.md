@@ -120,7 +120,7 @@ A `##` section's parent is **always the file node**: "organise by `##`" and name
 
 A default `parent` follows **structure**, not "the first `<node>` in this file": sibling `<node>` blocks written at file level all hang off the file node, while a `<node>` written *inside* another one hangs off that outer node (flat = parallel, nested tags = nested nodes). `###` and deeper are **not nodes and not section boundaries** — they stay part of the `##` section's body, so referencing `doc:x:1.1` reports a stale TID prefix. The advice knobs (`minFragNodes`, `fragChars`, `longSection`, `maxItems`) can be overridden under `advice: { … }` in the plugin config.
 
-After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, which is git-ignored).
+After a plugin upgrade, the first `kb_diag` adds a `plugin-updated` item asking the agent to re-read the bundled skill — once per library (state lives in `.nodekb/.plugin-state.json`, kept out of git via `.git/info/exclude`; diagnosing must not leave the library with uncommitted changes). That item is **not** controlled by `advice: { display: false }` (which only silences improvement suggestions), but it **does count** toward `advice.limit` / `maxItems` and sits first; `nodekb diag` behaves the same. If the state file cannot be written (read-only library, insufficient permissions), the report appends "（状态文件写不进去，下次还会提醒）".
 
 ## The library's own rules (`.nodekb/rules.json`)
 

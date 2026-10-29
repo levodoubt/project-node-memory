@@ -45,3 +45,7 @@ kb_write target=doc/03-...md           mode=append  content=...
 - `validateContent`：标签形态 + 成对（`mode=replace` 关掉成对那半）+ 标题行。
 - `writeInto` 入口：换行归一、路径检查、段边界解析。
 - 改名除了重写引用，收尾也跑一次 `diag` 把 error 带进回执。
+
+## 板块纪律：todo 只放未完成项
+
+`todo/` 是**待办列表**，不是流水账。做完的事当场搬走：定稿结论进 `doc/` 对应板块，踩坑进 `lessons/`，已发布的批次/收口清单/流程约定进 `doc/` 的版本史一类文件。留在 todo 里的「已完成」段落会让下一个人分不清「还在做」和「早做完了」——要么重复做，要么漏做。

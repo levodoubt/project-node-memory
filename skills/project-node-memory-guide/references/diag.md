@@ -67,3 +67,5 @@
 ## 插件升级后的一次性提醒
 
 插件升级后第一次跑 `kb_diag`，报告里会多出一条 `plugin-updated`：「规则变了，先重读本技能」。每条库只提醒一次（记在 `.nodekb/.plugin-state.json`，位置在 `.git/info/exclude` 里——诊断不会把库弄成「有未提交改动」）。
+
+这条提醒**不受** `advice: { display: false }` 控制（那个开关只关改进建议），但**计入** `advice.limit` / `maxItems`——它排在 advice 最前，超上限时先被截掉的是后面的建议。状态文件写不进去时（只读库、权限不足），回执里会多一句「（状态文件写不进去，下次还会提醒）」；命令行 `nodekb diag` 与 `kb_diag` 行为一致（1.5.18 起命令行也吃 `advice.limit`）。

@@ -2741,6 +2741,43 @@ section('tscl 定义与双语法')
   fs.rmSync(path.join(root, 'fb-elsewhere'), { recursive: true, force: true })
 }
 
+// ── 25. 升级提醒的边界：上限 / BOM / 写不进去 / 两层同构（1.5.18）─────────────
+{
+  section('升级提醒：上限、BOM、写不进去、两层同构（1.5.18）')
+  const noticeMod = await import(url(path.join(root, 'lib/engine/notice.js')))
+  const { updateNotice, withNotice, STATE_FILE } = noticeMod
+  const tmpH = fs.mkdtempSync(path.join((await import('node:os')).tmpdir(), 'nkb-notice-'))
+  const kbn = path.join(tmpH, 'lib')
+  fs.mkdirSync(path.join(kbn, 'doc'), { recursive: true })
+  fs.writeFileSync(path.join(kbn, 'doc/a.md'), '# A\n\n正文。\n', 'utf8')
+
+  // ① 带 BOM 的状态文件：JSON.parse 会抛，曾把「1.5.17 建的库」说成「1.5.0 之前」
+  fs.writeFileSync(path.join(kbn, STATE_FILE), '\uFEFF' + JSON.stringify({ seen_version: '0.9.9', at: 'x' }), 'utf8')
+  const nB = updateNotice(kbn)
+  ok('带 BOM 的状态文件也读得出旧版本号', !!nB && /0\.9\.9/.test(nB.message), nB ? nB.message.slice(0, 80) : 'null')
+  ok('带 BOM 时不再误报「1.5.0 之前」', !!nB && !/1\.5\.0 之前/.test(nB.message), '')
+
+  // ② withNotice：提醒排最前、按 limit 截断、0 = 不限、缺省用 maxItems
+  const items = [{ code: 'a' }, { code: 'b' }, { code: 'c' }]
+  const wn = withNotice(items, { code: 'plugin-updated' }, { limit: 2 })
+  ok('withNotice 把提醒排最前并按 limit 截断', wn.length === 2 && wn[0].code === 'plugin-updated', JSON.stringify(wn.map((x) => x.code)))
+  ok('limit=0 表示不限', withNotice(items, { code: 'plugin-updated' }, { limit: 0 }).length === 4, '')
+  ok('没给 limit 时用 maxItems（缺省 5）', withNotice(new Array(9).fill({ code: 'x' }), { code: 'plugin-updated' }, {}).length === 5, '')
+  ok('没有提醒时原样返回（同一个数组）', withNotice(items, null, { limit: 1 }) === items, '')
+
+  // ③ 状态写不进去（目录不存在/只读）时，回执要点明，否则每跑一次都报同一句
+  const nW = updateNotice(path.join(tmpH, 'no-such-dir'))
+  ok('状态写不进去时提醒里说明（不静默重复）', !!nW && /写不进去/.test(nW.message), nW ? nW.message.slice(0, 120) : 'null')
+
+  // ④ 工具层与命令行都走同一个 withNotice（各写一遍就会漂：1.5.17 命令行漏了上限）
+  const toolsSrc = fs.readFileSync(path.join(root, 'lib/host/tools.js'), 'utf8')
+  const cliSrc = fs.readFileSync(path.join(root, 'lib/cli.js'), 'utf8')
+  ok('kb_diag 走 withNotice', /withNotice\(/.test(toolsSrc) && !/advice\.unshift\(notice\)/.test(toolsSrc), '')
+  ok('命令行 diag 也走 withNotice（吃 advice.limit）', /withNotice\(/.test(cliSrc) && !/advice\.unshift\(notice\)/.test(cliSrc), '')
+
+  fs.rmSync(tmpH, { recursive: true, force: true })
+}
+
 // ── 汇总 ──────────────────────────────────────────────────────────────────
 console.log(`\n${pass} passed, ${fail} failed${gitSkipped ? `, ${gitSkipped} git 断言跳过（环境不允许子进程）` : ''}`)
 // 不用 process.exit()：Windows 上在 server.close() 的同时调它会触发 libuv 断言
