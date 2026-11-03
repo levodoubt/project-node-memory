@@ -589,7 +589,7 @@ ok('Icon() 返回 svg', (() => {
       '排线颜色取自模块类型色（不再统一纯白）',
       linkPaths.length > 0 &&
         linkPaths.every((p) => !/255,255,255/.test(String(p.props.stroke))) &&
-        linkPaths.every((p) => String(p.props.opacity) === '0.9'),
+        linkPaths.every((p) => String(p.props.opacity) === '0.95'),
       linkPaths.map((p) => `${p.props.stroke}@${p.props.opacity}`).join(' | '),
     )
   }
