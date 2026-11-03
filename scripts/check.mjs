@@ -414,6 +414,122 @@ ok('Icon() 返回 svg', (() => {
   ok('没有 DOM 度量也能排（不依赖 document）', typeof I.graphTitleLines('测试').lines.length === 'number')
 }
 
+// 电路板布局：面积 = 节点数占比、只标一层、下钻换层、确定性
+{
+  const I = plugin.__internals
+  const n = (tid, type, kids) => ({ tid, title: '标题 ' + tid, type, kind: 'section', children: kids || [] })
+  const root = n('root', 'root', [
+    n('a', 'doc', [n('a1', 'doc'), n('a2', 'doc'), n('a3', 'doc')]),
+    n('b', 'todo', [n('b1', 'todo')]),
+    n('c', 'lessons'),
+  ])
+  ok('__internals 暴露电路板函数', typeof I.boardLayout === 'function' && typeof I.squarify === 'function' && typeof I.findPath === 'function' && typeof I.typeFill === 'function')
+  const lay = I.boardLayout(root, { focus: '', hidden: {} })
+  const top = lay.modules.filter((m) => m.depth === 0)
+  ok('总视图的节点总数', lay.total === 8, String(lay.total))
+  ok('只有带子节点的节点才画成模块', top.map((m) => m.tid).join(',') === 'a,b', top.map((m) => m.tid).join(','))
+  ok('叶子节点落成焊盘（c 没有子节点）', lay.pads.some((p) => p.tid === 'c') && !lay.modules.some((m) => m.tid === 'c'), lay.pads.map((p) => p.tid).join(','))
+  const topArea = (tid) => {
+    const m = top.find((x) => x.tid === tid)
+    return m ? m.w * m.h : 0
+  }
+  // 板面按子节点数分配：a 有 4 个节点、b 有 2 个，面积比应接近 2:1
+  ok('模块面积正比于子树节点数（a 是 b 的两倍）', Math.abs(topArea('a') / topArea('b') - 2) < 0.25, (topArea('a') / topArea('b')).toFixed(3))
+  ok('大的模块面积真的更大', topArea('a') > topArea('b'))
+  // 同样大小的两块面积必须几乎相等（间距是固定值，所以只有大模块才准）
+  const even = n('root', 'root', [
+    n('x', 'doc', [n('x1', 'doc'), n('x2', 'doc'), n('x3', 'doc'), n('x4', 'doc')]),
+    n('y', 'doc', [n('y1', 'doc'), n('y2', 'doc'), n('y3', 'doc'), n('y4', 'doc')]),
+  ])
+  const evenArea = I.boardLayout(even, { focus: '', hidden: {} }).modules.filter((m) => m.depth === 0).map((m) => m.w * m.h)
+  ok('节点数相同的模块面积相等', Math.abs(evenArea[0] - evenArea[1]) / evenArea[0] < 0.01, evenArea.map((x) => Math.round(x)).join(' vs '))
+  ok('模块互不重叠（含内层）', lay.modules.every((m, i) => lay.modules.every((o, j) => i === j ||
+    m.x + m.w <= o.x + 0.01 || o.x + o.w <= m.x + 0.01 || m.y + m.h <= o.y + 0.01 || o.y + o.h <= m.y + 0.01)))
+  ok('模块都在板内', lay.modules.every((m) => m.x >= 0 && m.y >= 0 && m.x + m.w <= lay.board.w + 0.01 && m.y + m.h <= lay.board.h + 0.01))
+  ok('同一棵树两次排出来一模一样', JSON.stringify(I.boardLayout(root, { focus: '', hidden: {} })) === JSON.stringify(lay))
+  ok('焊盘只给没有子节点的节点', lay.pads.every((p) => !lay.modules.some((m) => m.tid === p.tid)))
+  ok('焊盘半径随层级递减', lay.pads.every((p) => p.r <= 11 - p.depth * 1.2 + 0.001) && lay.pads.some((p) => p.depth === 1), lay.pads.map((p) => p.depth + ':' + p.r.toFixed(1)).join(','))
+  // 递归铺到更深：三级链最后一格必须还是焊盘，不能变成小方框
+  const deep = n('root', 'root', [n('d', 'doc', [n('d1', 'doc', [n('d2', 'doc')])])])
+  const deepLay = I.boardLayout(deep, { focus: '', hidden: {} })
+  ok('递归铺到第 3 层并落成焊盘', deepLay.pads.length === 1 && deepLay.pads[0].tid === 'd2' && deepLay.pads[0].depth === 2, JSON.stringify(deepLay.pads.map((p) => [p.tid, p.depth])))
+  const one = I.boardLayout(root, { focus: '', hidden: {}, levels: 1 })
+  ok('层数可调：只铺一层时不再往里画', one.pads.length === 1 && one.modules.length === 2, `${one.pads.length}/${one.modules.length}`)
+  ok('findPath 给出根到节点的整条路径', (I.findPath(root, 'a2') || []).map((x) => x.tid).join('>') === 'root>a>a2')
+  ok('findPath 找不到时返回 null', I.findPath(root, '没有这个') === null)
+  const drill = I.boardLayout(root, { focus: 'a', hidden: {} })
+  ok('下钻后焦点就是 a，路径两级', drill.focus === 'a' && drill.path.length === 2 && drill.level === 1, JSON.stringify(drill.path.map((p) => p.tid)))
+  ok('下钻后 a 的三个叶子全是焊盘', drill.pads.length === 3 && drill.modules.length === 0, `${drill.pads.length}/${drill.modules.length}`)
+  ok('下钻后总分母跟着变小', drill.total === 4 && lay.total === 8, `${drill.total}/${lay.total}`)
+  const hid = I.boardLayout(root, { focus: '', hidden: { doc: true } })
+  ok('筛掉类型后面积重新分配', hid.total === 4 && hid.modules.length === 1 && hid.modules[0].tid === 'b', `${hid.total}/${hid.modules.length}`)
+  ok('subtreeCount 数的是子树（含自己）', I.subtreeCount(root, {}) === 8 && I.subtreeCount(root, { doc: true }) === 4)
+  ok('模块填充用外框色的半透明淡色', /0\.15\)|\/ 0\.15/.test(I.typeFill('doc', 0.15)), I.typeFill('doc', 0.15))
+  // 排线 = 真链接：两端都在板上的引用才连线，未知端点直接丢掉
+  const wired = I.boardLayout(root, { focus: '', hidden: {}, edges: [['a1', 'a2'], ['a', 'c'], ['没有这个', 'a'], ['a1', 'a1']] })
+  ok('排线只为两端都在板上的引用连线', wired.links.length === 2, JSON.stringify(wired.links.map((l) => [l.from, l.to])))
+  ok('排线走正交折线（三段）', wired.links.every((l) => /^M[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+$/.test(l.d)), wired.links.map((l) => l.d).join(' | '))
+  ok('没给边就不乱连线', lay.links.length === 0)
+  const wiredBoard = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
+  const wiredCls = []
+  ;(function walk4(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk4)
+    if (x.props && x.props.className) wiredCls.push(String(x.props.className))
+    ;(x.children || []).forEach(walk4)
+  })(wiredBoard)
+  ok('Board 画出排线（有 className 区分）', wiredCls.some((c) => c.indexOf('link') >= 0), wiredCls.filter((c) => c.indexOf('link') >= 0).join('|'))
+
+  const board = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, onDrill() {}, onUp() {}, onSelect() {} })
+  const cls = []
+  ;(function walk(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk)
+    if (x.props && x.props.className) cls.push(String(x.props.className))
+    ;(x.children || []).forEach(walk)
+  })(board)
+  ok('Board 渲染出板底/模块/走线/面包屑', cls.some((c) => c === 'nkb-bboard') && cls.some((c) => c.startsWith('nkb-bmod')) &&
+    cls.some((c) => c.startsWith('nkb-btrace')) && cls.some((c) => c === 'nkb-crumb'), cls.slice(0, 8).join('|'))
+  ok('总视图的丝印只有一个根面包屑', cls.filter((c) => c.startsWith('nkb-crumb-i')).length === 1, cls.filter((c) => c.startsWith('nkb-crumb')).join('|'))
+
+  // 图形不靠 CSS 也能看见：fill/stroke 一律写成属性（旧 <style> 残留时不会整块全黑）
+  const shapes = []
+  ;(function walk2(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk2)
+    if (typeof x.type === 'string') shapes.push(x)
+    ;(x.children || []).forEach(walk2)
+  })(board)
+  const circles = shapes.filter((s) => s.type === 'circle')
+  const texts = shapes.filter((s) => s.type === 'text')
+  const paths = shapes.filter((s) => s.type === 'path')
+  const rects = shapes.filter((s) => s.type === 'rect')
+  ok('焊盘圆点有 fill 属性', circles.length > 0 && circles.every((c) => c.props.fill), `${circles.length} 个圆，缺 fill ${circles.filter((c) => !c.props.fill).length}`)
+  ok('丝印文字有 fill 属性', texts.length > 0 && texts.every((t) => t.props.fill), `${texts.length} 个 text`)
+  ok('走线有 stroke 属性', paths.length > 0 && paths.every((p) => p.props.stroke), `${paths.length} 条 path`)
+  ok('矩形都有 fill 属性', rects.length > 0 && rects.filter((r) => !r.props.fill).length === 0, `${rects.length} 个 rect`)
+  const dots = circles.filter((c) => c.props.fill && c.props.fill !== 'none')
+  ok('焊盘是亮白（不是灰点）', dots.length > 0 && dots.every((c) => /2[45][0-9],2[0-9][0-9],25[0-9]|255,255,255/.test(String(c.props.fill))), dots.map((d) => d.props.fill).join('|'))
+  // 走线必须排在模块之后：半透明填充会盖住先画的线
+  const seq = []
+  ;(function walk3(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk3)
+    if (x.props && x.props.className) seq.push(String(x.props.className))
+    ;(x.children || []).forEach(walk3)
+  })(board)
+  let lastMod = -1
+  let firstTrace = -1
+  let lastPad = -1
+  seq.forEach((c, i) => {
+    if (c.startsWith('nkb-bmod')) lastMod = i
+    if (c.startsWith('nkb-btrace') && firstTrace < 0) firstTrace = i
+    if (c.startsWith('nkb-bpad')) lastPad = i
+  })
+  ok('走线画在模块之后（不会被填充盖住）', lastMod >= 0 && firstTrace > lastMod, `${firstTrace} > ${lastMod}`)
+  ok('焊盘画在走线之后', lastPad > firstTrace, `${lastPad} > ${firstTrace}`)
+}
+
 // markdown 渲染：块解析是纯函数，先测数据形状再测组件
 {
   const I = plugin.__internals
