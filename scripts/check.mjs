@@ -648,6 +648,51 @@ ok('Icon() 返回 svg', (() => {
     })
     ok('焊盘沿模块边缘排布（不在正中）', inside.length === 3 && nearEdge && veryNear, inside.map((p) => `${p.tid}@${Math.round(p.cx)},${Math.round(p.cy)}`).join(' '))
   }
+  // 设置面板里的可调项要真的生效（不是摆设）
+  {
+    const padRadii = (el) => {
+      const out = []
+      ;(function walk(x) {
+        if (!x || typeof x !== 'object') return
+        if (Array.isArray(x)) return x.forEach(walk)
+        const c = String((x.props && x.props.className) || '')
+        if (x.type === 'g' && c.indexOf('nkb-bpad') === 0 && x.children && x.children[0] && x.children[0].type === 'circle') out.push(x.children[0].props.r)
+        ;(x.children || []).forEach(walk)
+      })(el)
+      return out
+    }
+    const boardFills = (el) => {
+      const out = []
+      ;(function walk(x) {
+        if (!x || typeof x !== 'object') return
+        if (Array.isArray(x)) return x.forEach(walk)
+        if (String((x.props && x.props.className) || '') === 'nkb-bboard') out.push(String((x.props.style && x.props.style.fill) || ''))
+        ;(x.children || []).forEach(walk)
+      })(el)
+      return out
+    }
+    const plain = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, edges: [], onDrill() {}, onUp() {}, onSelect() {} })
+    const tuned = I.Board({
+      root,
+      sel: null,
+      focus: '',
+      hidden: {},
+      fitTick: 0,
+      edges: [],
+      tune: { padScale: 2, plate: 0.2 },
+      onDrill() {},
+      onUp() {},
+      onSelect() {},
+    })
+    const r0 = padRadii(plain)
+    const r1 = padRadii(tuned)
+    ok(
+      '设置里的焊盘大小生效（半径按倍数缩放）',
+      r0.length > 0 && r0.length === r1.length && r0.every((v, i) => Math.abs(r1[i] - v * 2) < 1e-6),
+      `${r0.length} 个焊盘`,
+    )
+    ok('设置里的板底不透明度生效', boardFills(tuned).some((f) => f.indexOf('0.2') >= 0), boardFills(tuned).join(','))
+  }
   // 走线必须排在模块之后：半透明填充会盖住先画的线
   const seq = []
   ;(function walk3(x) {
