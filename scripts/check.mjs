@@ -562,8 +562,44 @@ ok('Icon() 返回 svg', (() => {
     ;(x.children || []).forEach(walk6)
   })(wiredBoard)
   ok('排线有 stroke 属性', wiredPaths.length > 0 && wiredPaths.every((p) => p.props.stroke), `${wiredPaths.length} 条 path`)
-  const solid = circles.filter((c) => /255,255,255/.test(String(c.props.fill)))
-  ok('焊盘是纯白实心小圆点', solid.length > 0 && solid.length === circles.length, `${solid.length}/${circles.length}`)
+  {
+    const linkPaths = wiredPaths.filter((p) => String(p.props.className || '').indexOf('link') >= 0)
+    ok(
+      '排线颜色取自模块类型色（不再统一纯白）',
+      linkPaths.length > 0 &&
+        linkPaths.every((p) => !/255,255,255/.test(String(p.props.stroke))) &&
+        linkPaths.every((p) => String(p.props.opacity) === '0.9'),
+      linkPaths.map((p) => `${p.props.stroke}@${p.props.opacity}`).join(' | '),
+    )
+  }
+  // 焊盘三态：默认空心白环 / 被排线连到 = 纯白实心 / 悬停或被选中 = 蓝色实心
+  const hollowBoard = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, edges: [], onDrill() {}, onUp() {}, onSelect() {} })
+  const hollowCircles = []
+  ;(function walk7(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk7)
+    if (x.type === 'circle') hollowCircles.push(x)
+    ;(x.children || []).forEach(walk7)
+  })(hollowBoard)
+  ok(
+    '没有排线时焊盘是空心白环',
+    hollowCircles.length > 0 &&
+      hollowCircles.every((c) => String(c.props.fill) === 'none' && /255,255,255/.test(String(c.props.stroke))),
+    hollowCircles.map((c) => `${c.props.fill}/${c.props.stroke}`).join(' | '),
+  )
+  {
+    const wiredCircles = []
+    ;(function walk8(x) {
+      if (!x || typeof x !== 'object') return
+      if (Array.isArray(x)) return x.forEach(walk8)
+      if (x.type === 'circle') wiredCircles.push(x)
+      ;(x.children || []).forEach(walk8)
+    })(wiredBoard)
+    const solid = wiredCircles.filter((c) => /255,255,255/.test(String(c.props.fill)))
+    const hollow = wiredCircles.filter((c) => String(c.props.fill) === 'none')
+    ok('被排线连到的焊盘画成纯白实心点', solid.length > 0, `${solid.length}/${wiredCircles.length}`)
+    ok('没连线的焊盘保持空心', hollow.length > 0, `${hollow.length}/${wiredCircles.length}`)
+  }
   const hotBoard = I.Board({ root, sel: 'a1', focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
   const hotCircles = []
   ;(function walk5(x) {
@@ -572,7 +608,11 @@ ok('Icon() 返回 svg', (() => {
     if (x.type === 'circle') hotCircles.push(x)
     ;(x.children || []).forEach(walk5)
   })(hotBoard)
-  ok('悬停/选中的焊盘与它连到的焊盘变蓝', hotCircles.some((c) => /96,170,255/.test(String(c.props.fill))), hotCircles.map((c) => c.props.fill).join('|'))
+  ok(
+    '悬停/选中的焊盘与它连到的焊盘一起变蓝',
+    hotCircles.filter((c) => /96,170,255/.test(String(c.props.fill))).length >= 2,
+    hotCircles.map((c) => c.props.fill).join('|'),
+  )
   // 焊盘沿模块边缘排一圈：到四边的最小距离要小，不能堆在正中
   {
     const modA = lay.modules.find((m) => m.tid === 'a')
