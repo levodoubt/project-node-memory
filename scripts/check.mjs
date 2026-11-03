@@ -494,6 +494,28 @@ ok('Icon() 返回 svg', (() => {
     }
   })
   ok('同一条水平走线上排线不重叠', !laneCross, JSON.stringify(laneRuns))
+  // 排线不许从别的焊盘身上碾过去
+  const padHit = []
+  wired.links.forEach((l) => {
+    const pts = l.d.split('L').map((s) => s.replace(/^M/, '').split(',').map(Number))
+    wired.pads.forEach((p) => {
+      if (p.tid === l.from || p.tid === l.to) return
+      for (let i = 1; i < pts.length; i++) {
+        const [x1, y1] = pts[i - 1]
+        const [x2, y2] = pts[i]
+        const dx = x2 - x1
+        const dy = y2 - y1
+        const len2 = dx * dx + dy * dy
+        let t = len2 ? ((p.cx - x1) * dx + (p.cy - y1) * dy) / len2 : 0
+        t = Math.max(0, Math.min(1, t))
+        const px = x1 + t * dx
+        const py = y1 + t * dy
+        const dist = Math.hypot(p.cx - px, p.cy - py)
+        if (dist < p.r - 0.6) padHit.push(`${l.from}>${l.to} 压到 ${p.tid}`)
+      }
+    })
+  })
+  ok('排线不压过路径上的其它焊盘', padHit.length === 0, padHit.join('; '))
   ok('没给边就不乱连线', lay.links.length === 0)
   const wiredBoard = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
   const wiredCls = []
@@ -540,8 +562,8 @@ ok('Icon() 返回 svg', (() => {
     ;(x.children || []).forEach(walk6)
   })(wiredBoard)
   ok('排线有 stroke 属性', wiredPaths.length > 0 && wiredPaths.every((p) => p.props.stroke), `${wiredPaths.length} 条 path`)
-  const hollow = circles.filter((c) => c.props.fill === 'none')
-  ok('焊盘默认是空心圆（白描边）', hollow.length > 0 && hollow.every((c) => /255,255,255/.test(String(c.props.stroke))), `${hollow.length} 个空心圆`)
+  const solid = circles.filter((c) => /255,255,255/.test(String(c.props.fill)))
+  ok('焊盘是纯白实心小圆点', solid.length > 0 && solid.length === circles.length, `${solid.length}/${circles.length}`)
   const hotBoard = I.Board({ root, sel: 'a1', focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
   const hotCircles = []
   ;(function walk5(x) {
@@ -550,7 +572,21 @@ ok('Icon() 返回 svg', (() => {
     if (x.type === 'circle') hotCircles.push(x)
     ;(x.children || []).forEach(walk5)
   })(hotBoard)
-  ok('被排线连到（或选中）的焊盘填实成白色', hotCircles.some((c) => /255,255,255,0\.(6|95)/.test(String(c.props.fill))), hotCircles.map((c) => c.props.fill).join('|'))
+  ok('悬停/选中的焊盘与它连到的焊盘变蓝', hotCircles.some((c) => /96,170,255/.test(String(c.props.fill))), hotCircles.map((c) => c.props.fill).join('|'))
+  // 焊盘沿模块边缘排一圈：到四边的最小距离要小，不能堆在正中
+  {
+    const modA = lay.modules.find((m) => m.tid === 'a')
+    const inside = lay.pads.filter((p) => ['a1', 'a2', 'a3'].indexOf(p.tid) >= 0)
+    const nearEdge = inside.every((p) => {
+      const d = Math.min(Math.abs(p.cx - modA.x), Math.abs(modA.x + modA.w - p.cx), Math.abs(p.cy - modA.y), Math.abs(modA.y + modA.h - p.cy))
+      return d <= 50
+    })
+    const veryNear = inside.some((p) => {
+      const d = Math.min(Math.abs(p.cx - modA.x), Math.abs(modA.x + modA.w - p.cx), Math.abs(p.cy - modA.y), Math.abs(modA.y + modA.h - p.cy))
+      return d <= 30
+    })
+    ok('焊盘沿模块边缘排布（不在正中）', inside.length === 3 && nearEdge && veryNear, inside.map((p) => `${p.tid}@${Math.round(p.cx)},${Math.round(p.cy)}`).join(' '))
+  }
   // 走线必须排在模块之后：半透明填充会盖住先画的线
   const seq = []
   ;(function walk3(x) {
