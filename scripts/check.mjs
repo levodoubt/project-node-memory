@@ -468,7 +468,32 @@ ok('Icon() 返回 svg', (() => {
   // 排线 = 真链接：两端都在板上的引用才连线，未知端点直接丢掉
   const wired = I.boardLayout(root, { focus: '', hidden: {}, edges: [['a1', 'a2'], ['a', 'c'], ['没有这个', 'a'], ['a1', 'a1']] })
   ok('排线只为两端都在板上的引用连线', wired.links.length === 2, JSON.stringify(wired.links.map((l) => [l.from, l.to])))
-  ok('排线走正交折线（三段）', wired.links.every((l) => /^M[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+L[\d.]+,[\d.]+$/.test(l.d)), wired.links.map((l) => l.d).join(' | '))
+  const segAngleOk = wired.links.every((l) => {
+    const pts = l.d.split('L').map((s) => s.replace(/^M/, '').split(',').map(Number))
+    for (let i = 1; i < pts.length; i++) {
+      const dx = Math.abs(pts[i][0] - pts[i - 1][0])
+      const dy = Math.abs(pts[i][1] - pts[i - 1][1])
+      if (dx > 0.6 && dy > 0.6 && Math.abs(dx - dy) > 0.6) return false
+    }
+    return true
+  })
+  ok('排线只有横/竖/45° 斜线', segAngleOk, wired.links.map((l) => l.d).join(' | '))
+  const laneRuns = []
+  let laneCross = false
+  wired.links.forEach((l) => {
+    const pts = l.d.split('L').map((s) => s.replace(/^M/, '').split(',').map(Number))
+    for (let i = 1; i < pts.length; i++) {
+      if (Math.abs(pts[i][1] - pts[i - 1][1]) > 0.3) continue
+      const y = pts[i][1]
+      const x1 = Math.min(pts[i][0], pts[i - 1][0])
+      const x2 = Math.max(pts[i][0], pts[i - 1][0])
+      laneRuns.forEach((r) => {
+        if (Math.abs(r.y - y) < 3 && !(x2 < r.x1 - 3 || x1 > r.x2 + 3)) laneCross = true
+      })
+      laneRuns.push({ y, x1, x2 })
+    }
+  })
+  ok('同一条水平走线上排线不重叠', !laneCross, JSON.stringify(laneRuns))
   ok('没给边就不乱连线', lay.links.length === 0)
   const wiredBoard = I.Board({ root, sel: null, focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
   const wiredCls = []
@@ -488,8 +513,8 @@ ok('Icon() 返回 svg', (() => {
     if (x.props && x.props.className) cls.push(String(x.props.className))
     ;(x.children || []).forEach(walk)
   })(board)
-  ok('Board 渲染出板底/模块/走线/面包屑', cls.some((c) => c === 'nkb-bboard') && cls.some((c) => c.startsWith('nkb-bmod')) &&
-    cls.some((c) => c.startsWith('nkb-btrace')) && cls.some((c) => c === 'nkb-crumb'), cls.slice(0, 8).join('|'))
+  ok('Board 渲染出板底/模块/排线/面包屑', cls.some((c) => c === 'nkb-bboard') && cls.some((c) => c.startsWith('nkb-bmod')) &&
+    wiredCls.some((c) => c.startsWith('nkb-btrace')) && cls.some((c) => c === 'nkb-crumb'), cls.slice(0, 8).join('|'))
   ok('总视图的丝印只有一个根面包屑', cls.filter((c) => c.startsWith('nkb-crumb-i')).length === 1, cls.filter((c) => c.startsWith('nkb-crumb')).join('|'))
 
   // 图形不靠 CSS 也能看见：fill/stroke 一律写成属性（旧 <style> 残留时不会整块全黑）
@@ -506,10 +531,26 @@ ok('Icon() 返回 svg', (() => {
   const rects = shapes.filter((s) => s.type === 'rect')
   ok('焊盘圆点有 fill 属性', circles.length > 0 && circles.every((c) => c.props.fill), `${circles.length} 个圆，缺 fill ${circles.filter((c) => !c.props.fill).length}`)
   ok('丝印文字有 fill 属性', texts.length > 0 && texts.every((t) => t.props.fill), `${texts.length} 个 text`)
-  ok('走线有 stroke 属性', paths.length > 0 && paths.every((p) => p.props.stroke), `${paths.length} 条 path`)
   ok('矩形都有 fill 属性', rects.length > 0 && rects.filter((r) => !r.props.fill).length === 0, `${rects.length} 个 rect`)
-  const dots = circles.filter((c) => c.props.fill && c.props.fill !== 'none')
-  ok('焊盘是亮白（不是灰点）', dots.length > 0 && dots.every((c) => /2[45][0-9],2[0-9][0-9],25[0-9]|255,255,255/.test(String(c.props.fill))), dots.map((d) => d.props.fill).join('|'))
+  const wiredPaths = []
+  ;(function walk6(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk6)
+    if (x.type === 'path') wiredPaths.push(x)
+    ;(x.children || []).forEach(walk6)
+  })(wiredBoard)
+  ok('排线有 stroke 属性', wiredPaths.length > 0 && wiredPaths.every((p) => p.props.stroke), `${wiredPaths.length} 条 path`)
+  const hollow = circles.filter((c) => c.props.fill === 'none')
+  ok('焊盘默认是空心圆（白描边）', hollow.length > 0 && hollow.every((c) => /255,255,255/.test(String(c.props.stroke))), `${hollow.length} 个空心圆`)
+  const hotBoard = I.Board({ root, sel: 'a1', focus: '', hidden: {}, fitTick: 0, edges: [['a1', 'a2']], onDrill() {}, onUp() {}, onSelect() {} })
+  const hotCircles = []
+  ;(function walk5(x) {
+    if (!x || typeof x !== 'object') return
+    if (Array.isArray(x)) return x.forEach(walk5)
+    if (x.type === 'circle') hotCircles.push(x)
+    ;(x.children || []).forEach(walk5)
+  })(hotBoard)
+  ok('被排线连到（或选中）的焊盘填实成白色', hotCircles.some((c) => /255,255,255,0\.(6|95)/.test(String(c.props.fill))), hotCircles.map((c) => c.props.fill).join('|'))
   // 走线必须排在模块之后：半透明填充会盖住先画的线
   const seq = []
   ;(function walk3(x) {
@@ -517,7 +558,7 @@ ok('Icon() 返回 svg', (() => {
     if (Array.isArray(x)) return x.forEach(walk3)
     if (x.props && x.props.className) seq.push(String(x.props.className))
     ;(x.children || []).forEach(walk3)
-  })(board)
+  })(wiredBoard)
   let lastMod = -1
   let firstTrace = -1
   let lastPad = -1
