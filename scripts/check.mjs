@@ -563,6 +563,27 @@ ok('Icon() 返回 svg', (() => {
   })(wiredBoard)
   ok('排线有 stroke 属性', wiredPaths.length > 0 && wiredPaths.every((p) => p.props.stroke), `${wiredPaths.length} 条 path`)
   {
+    // SVG 表现属性会被同名 CSS 盖掉；旧版 <style> 残留导致整块变灰/变透明都是这么来的。
+    // 所以颜色必须同时写进 style（自检看属性，浏览器看 style）。
+    const missing = []
+    const shapeWant = ['rect', 'circle', 'path']
+    ;(function walk9(x) {
+      if (!x || typeof x !== 'object') return
+      if (Array.isArray(x)) return x.forEach(walk9)
+      const c = String((x.props && x.props.className) || '')
+      const owned = c.startsWith('nkb-bmod') || c.startsWith('nkb-bpad') || c.startsWith('nkb-bboard') || c.indexOf('link') >= 0
+      if (owned && shapeWant.indexOf(x.type) >= 0 && !(x.props && x.props.style)) missing.push(c + '/' + x.type)
+      if (owned) {
+        ;(x.children || []).forEach((ch) => {
+          if (!ch || typeof ch !== 'object' || Array.isArray(ch)) return
+          if (shapeWant.indexOf(ch.type) >= 0 && !(ch.props && ch.props.style)) missing.push(c + '>' + ch.type)
+        })
+      }
+      ;(x.children || []).forEach(walk9)
+    })(wiredBoard)
+    ok('电路板图形的颜色写进 style（CSS 盖不掉）', missing.length === 0, missing.slice(0, 6).join(','))
+  }
+  {
     const linkPaths = wiredPaths.filter((p) => String(p.props.className || '').indexOf('link') >= 0)
     ok(
       '排线颜色取自模块类型色（不再统一纯白）',
